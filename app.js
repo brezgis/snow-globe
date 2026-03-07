@@ -124,7 +124,30 @@ import {
   }
 
   window.onYouTubeIframeAPIReady = function () {
-    player = new YT.Player('yt-player', {
+    // Compute the initial video BEFORE creating the player.
+    // Without an initial videoId, YouTube shows a recommendation grid
+    // instead of a blank player, and loadVideoById may not recover.
+    const block = getCurrentBlock();
+    const playlist = playlists[block.name];
+    let initialVideoId = undefined;
+    let initialStart = 0;
+
+    if (playlist && playlist.length) {
+      const todaysPlaylist = shuffleForToday(playlist, block.name, removedVideos);
+      const blockStart = getBlockStartTime(block);
+      const elapsed = (new Date() - blockStart) / 1000;
+      const pos = computeSchedulePosition(todaysPlaylist, elapsed);
+      if (pos.type === 'video') {
+        initialVideoId = pos.video.id;
+        initialStart = Math.floor(pos.seekTo);
+      } else if (pos.nextVideo) {
+        // We're in a bump — load the next video paused, bump overlay will cover it
+        initialVideoId = pos.nextVideo.id;
+        initialStart = 0;
+      }
+    }
+
+    const playerConfig = {
       width: '100%',
       height: '100%',
       playerVars: {
@@ -133,17 +156,23 @@ import {
         disablekb: 1,
         fs: 0,
         iv_load_policy: 3,
-        modestbranding: 1,
         rel: 0,
-        showinfo: 0,
         mute: 1,
+        origin: window.location.origin,
       },
       events: {
         onReady: onPlayerReady,
         onStateChange: onPlayerStateChange,
         onError: onPlayerError,
       },
-    });
+    };
+
+    if (initialVideoId) {
+      playerConfig.videoId = initialVideoId;
+      playerConfig.playerVars.start = initialStart;
+    }
+
+    player = new YT.Player('yt-player', playerConfig);
   };
 
   function onPlayerReady() {
