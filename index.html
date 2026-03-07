@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>snow-globe</title>
+  <meta name="description" content="a personal internet TV station. you don't choose.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>❄</text></svg>">
+</head>
+<body>
+
+  <!-- TV Static on load -->
+  <div id="static"><canvas></canvas></div>
+
+  <!-- Loading -->
+  <div id="loading">
+    <div id="loading-text">tuning in</div>
+  </div>
+
+  <!-- Main screen -->
+  <div id="screen">
+    <div id="player-wrap">
+      <div id="yt-player"></div>
+      <div id="click-guard"></div>
+    </div>
+  </div>
+
+  <!-- Bump interstitial -->
+  <div id="bump">
+    <p id="bump-text"></p>
+  </div>
+
+  <!-- CRT effects -->
+  <div id="crt-overlay"></div>
+  <div id="vignette"></div>
+
+  <!-- UI -->
+  <div id="now-playing"></div>
+  <div id="watermark">snow-globe</div>
+  <div id="block-label"></div>
+  <div id="clock"></div>
+  <button id="mute-btn" title="toggle sound">🔇</button>
+  <div id="unmute-hint">click anywhere for sound</div>
+
+  <script src="app.js"></script>
+</body>
+</html>

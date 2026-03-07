@@ -1,0 +1,55 @@
+{
+  "general": [
+    "you're watching a website pretend to be a TV. we're both okay with this.",
+    "nobody chose this. that's the point.",
+    "this is what TV felt like before algorithms.",
+    "somewhere, someone else is watching this too.",
+    "the best things you'll ever see are things you didn't search for.",
+    "left on.",
+    "[snow-globe]",
+    "no recommendations. no feed. just this.",
+    "you found the weird part of the internet. stay.",
+    "this was curated by a human. remember those?",
+    "there is no next episode. there is only now.",
+    "lean back.",
+    "the signal is the show.",
+    "you don't need to do anything right now.",
+    "this is not content. this is television."
+  ],
+  "morning": [
+    "good morning. you're early.",
+    "coffee helps.",
+    "the day hasn't started yet. enjoy that.",
+    "morning light looks good on you.",
+    "it's [time]. the world is waking up."
+  ],
+  "afternoon": [
+    "it's [time]. drink water.",
+    "afternoon. the productive hours, allegedly.",
+    "you could be doing something else. but here you are.",
+    "halfway through the day. halfway through the playlist.",
+    "it's [time]. this is fine."
+  ],
+  "evening": [
+    "the sun is setting somewhere.",
+    "evening programming. the good stuff.",
+    "it's [time]. you earned this.",
+    "dinner and television. a classic.",
+    "the night is young and so is this playlist."
+  ],
+  "latenight": [
+    "it's [time]. why are you still up?",
+    "late night. the internet gets weird now.",
+    "everyone else went to bed. not us.",
+    "the late hours belong to the curious.",
+    "3am energy. no apologies.",
+    "you and the insomniacs. a fellowship."
+  ],
+  "deadhours": [
+    "it's [time]. this is between us.",
+    "the dead hours. nothing is expected of you.",
+    "static. signal. static. signal.",
+    "the world is asleep. the broadcast continues.",
+    "ambient hours. let it wash over you."
+  ]
+}
