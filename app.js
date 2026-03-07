@@ -1,18 +1,14 @@
 // snow-globe — schedule engine + player logic
+// Pure logic lives in engine.js; this file handles DOM + YouTube.
+
+import {
+  BUMP_DURATION, BLOCKS, seededRandom, getDaySeed,
+  shuffleForToday, computeSchedulePosition, getCurrentBlock,
+  getBlockStartTime, formatTime, getBumpMessage,
+} from './engine.js';
 
 (function () {
   'use strict';
-
-  // ── Config ──────────────────────────────────────
-  const BUMP_DURATION = 12; // seconds per bump card
-
-  const BLOCKS = [
-    { name: 'morning',    start: 8,  end: 12, label: 'morning' },
-    { name: 'afternoon',  start: 12, end: 18, label: 'afternoon' },
-    { name: 'evening',    start: 18, end: 22, label: 'evening' },
-    { name: 'latenight',  start: 22, end: 26, label: 'late night' },  // 26 = 2am next day
-    { name: 'deadhours',  start: 2,  end: 8,  label: 'dead hours' },
-  ];
 
   // ── State ───────────────────────────────────────
   let playlists = {};
@@ -82,124 +78,7 @@
     }
   }
 
-  // ── Time helpers ────────────────────────────────
-  function getCurrentBlock() {
-    const now = new Date();
-    let hour = now.getHours();
-
-    // Handle late night wrap (22-26 means 22, 23, 0, 1)
-    for (const block of BLOCKS) {
-      if (block.name === 'latenight') {
-        if (hour >= 22 || hour < 2) return block;
-      } else if (block.name === 'deadhours') {
-        if (hour >= 2 && hour < 8) return block;
-      } else {
-        if (hour >= block.start && hour < block.end) return block;
-      }
-    }
-    // fallback
-    return BLOCKS[4]; // deadhours
-  }
-
-  function getBlockStartTime(block) {
-    const now = new Date();
-    const start = new Date(now);
-    start.setMinutes(0, 0, 0);
-
-    if (block.name === 'latenight') {
-      // If it's 0 or 1, the block started at 22 yesterday
-      if (now.getHours() < 2) {
-        start.setDate(start.getDate() - 1);
-      }
-      start.setHours(22);
-    } else {
-      start.setHours(block.start);
-    }
-    return start;
-  }
-
-  function formatTime(date) {
-    let h = date.getHours();
-    const m = date.getMinutes().toString().padStart(2, '0');
-    const ampm = h >= 12 ? 'pm' : 'am';
-    h = h % 12 || 12;
-    return `${h}:${m}${ampm}`;
-  }
-
-  // ── Daily Shuffle ────────────────────────────────
-  // Deterministic shuffle seeded by date — same order for everyone on the same day,
-  // different order each day.
-  function seededRandom(seed) {
-    // Simple mulberry32 PRNG
-    return function() {
-      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    };
-  }
-
-  function getDaySeed() {
-    const now = new Date();
-    return now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
-  }
-
-  function shuffleForToday(playlist, blockName) {
-    const seed = getDaySeed() + blockName.charCodeAt(0) * 1000;
-    const rng = seededRandom(seed);
-    const shuffled = [...playlist].filter(v => !removedVideos.has(v.id));
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-  }
-
-  // ── Schedule Engine ─────────────────────────────
-  // Given a playlist and elapsed seconds since block start,
-  // figure out which video should be playing and at what offset.
-  // Bumps are inserted between each video.
-  function computeSchedulePosition(playlist, elapsedSec) {
-    // Build a timeline: [video, bump, video, bump, ...]
-    let totalCycleDuration = 0;
-    for (const v of playlist) {
-      totalCycleDuration += v.duration + BUMP_DURATION;
-    }
-
-    // Where are we in the cycle?
-    const posInCycle = ((elapsedSec % totalCycleDuration) + totalCycleDuration) % totalCycleDuration;
-
-    let cursor = 0;
-    for (let i = 0; i < playlist.length; i++) {
-      const video = playlist[i];
-
-      // Video segment
-      if (posInCycle < cursor + video.duration) {
-        return {
-          type: 'video',
-          video: video,
-          index: i,
-          seekTo: posInCycle - cursor,
-          remainingSec: video.duration - (posInCycle - cursor),
-        };
-      }
-      cursor += video.duration;
-
-      // Bump segment
-      if (posInCycle < cursor + BUMP_DURATION) {
-        return {
-          type: 'bump',
-          nextVideo: playlist[(i + 1) % playlist.length],
-          nextIndex: (i + 1) % playlist.length,
-          remainingSec: BUMP_DURATION - (posInCycle - cursor),
-        };
-      }
-      cursor += BUMP_DURATION;
-    }
-
-    // Shouldn't get here, but fallback
-    return { type: 'video', video: playlist[0], index: 0, seekTo: 0, remainingSec: playlist[0].duration };
-  }
+  // Time helpers, shuffle, and schedule engine imported from engine.js
 
   function syncToSchedule() {
     const block = getCurrentBlock();
@@ -207,7 +86,7 @@
     if (!playlist || !playlist.length) return;
 
     // Shuffle playlist deterministically for today
-    const todaysPlaylist = shuffleForToday(playlist, block.name);
+    const todaysPlaylist = shuffleForToday(playlist, block.name, removedVideos);
 
     $blockLabel.textContent = block.label;
 
@@ -377,18 +256,7 @@
   }
 
   // ── Bump Cards ──────────────────────────────────
-  function getBumpMessage(blockName) {
-    const now = new Date();
-    const timeStr = formatTime(now);
-
-    // Pick from block-specific or general pool
-    const pool = [];
-    if (bumps[blockName]) pool.push(...bumps[blockName]);
-    if (bumps.general) pool.push(...bumps.general);
-
-    const msg = pool[Math.floor(Math.random() * pool.length)];
-    return msg.replace('[time]', timeStr);
-  }
+  // getBumpMessage imported from engine.js
 
   // ── Bump Audio ───────────────────────────────────
   const BUMP_AUDIO_COUNT = 23;
@@ -423,7 +291,7 @@
       player.pauseVideo();
     }
 
-    const message = getBumpMessage(blockName);
+    const message = getBumpMessage(blockName, bumps);
     $bumpText.textContent = message;
     $bump.classList.add('active');
     playBumpAudio();
@@ -470,7 +338,7 @@
       $clock.textContent = formatTime(new Date());
     }
     update();
-    setInterval(update, 10000);
+    setInterval(update, 30000);
   }
 
   // ── Mute ────────────────────────────────────────
