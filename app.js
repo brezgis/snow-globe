@@ -1,14 +1,19 @@
 // snow-globe — schedule engine + player logic
-// Pure logic lives in engine.js; this file handles DOM + YouTube.
-
-import {
-  BUMP_DURATION, BLOCKS, seededRandom, getDaySeed,
-  shuffleForToday, computeSchedulePosition, getCurrentBlock,
-  getBlockStartTime, formatTime, getBumpMessage,
-} from './engine.js';
 
 (function () {
   'use strict';
+
+  // ── Config ──────────────────────────────────────
+  const BUMP_DURATION = 12; // seconds per bump card
+  const GUIDE_CHANCE = 0.17; // odds a given bump is the TV guide instead of a text card
+
+  const BLOCKS = [
+    { name: 'morning',    start: 8,  end: 12, label: 'morning' },
+    { name: 'afternoon',  start: 12, end: 18, label: 'afternoon' },
+    { name: 'evening',    start: 18, end: 22, label: 'evening' },
+    { name: 'latenight',  start: 22, end: 26, label: 'late night' },  // 26 = 2am next day
+    { name: 'deadhours',  start: 2,  end: 8,  label: 'dead hours' },
+  ];
 
   // ── State ───────────────────────────────────────
   let playlists = {};
@@ -26,6 +31,9 @@ import {
   // ── DOM refs ────────────────────────────────────
   const $bump = document.getElementById('bump');
   const $bumpText = document.getElementById('bump-text');
+  const $guideGrid = document.querySelector('#bump-guide .guide-grid');
+  const $guideClock = document.querySelector('#bump-guide .guide-clock');
+  const $guideTicker = document.querySelector('#bump-guide .guide-ticker span');
   const $blockLabel = document.getElementById('block-label');
   const $clock = document.getElementById('clock');
   const $muteBtn = document.getElementById('mute-btn');
@@ -49,6 +57,15 @@ import {
       $blockLabel.classList.add('visible');
       $clock.classList.add('visible');
     }, 2000);
+
+    // Preview the TV guide directly: open /#guide
+    if (location.hash === '#guide') {
+      setTimeout(() => {
+        $static.classList.add('off');
+        if ($loading) $loading.style.display = 'none';
+        window.testGuide(600);
+      }, 400);
+    }
   }
 
   async function loadData() {
@@ -78,7 +95,124 @@ import {
     }
   }
 
-  // Time helpers, shuffle, and schedule engine imported from engine.js
+  // ── Time helpers ────────────────────────────────
+  function getCurrentBlock() {
+    const now = new Date();
+    let hour = now.getHours();
+
+    // Handle late night wrap (22-26 means 22, 23, 0, 1)
+    for (const block of BLOCKS) {
+      if (block.name === 'latenight') {
+        if (hour >= 22 || hour < 2) return block;
+      } else if (block.name === 'deadhours') {
+        if (hour >= 2 && hour < 8) return block;
+      } else {
+        if (hour >= block.start && hour < block.end) return block;
+      }
+    }
+    // fallback
+    return BLOCKS[4]; // deadhours
+  }
+
+  function getBlockStartTime(block) {
+    const now = new Date();
+    const start = new Date(now);
+    start.setMinutes(0, 0, 0);
+
+    if (block.name === 'latenight') {
+      // If it's 0 or 1, the block started at 22 yesterday
+      if (now.getHours() < 2) {
+        start.setDate(start.getDate() - 1);
+      }
+      start.setHours(22);
+    } else {
+      start.setHours(block.start);
+    }
+    return start;
+  }
+
+  function formatTime(date) {
+    let h = date.getHours();
+    const m = date.getMinutes().toString().padStart(2, '0');
+    const ampm = h >= 12 ? 'pm' : 'am';
+    h = h % 12 || 12;
+    return `${h}:${m}${ampm}`;
+  }
+
+  // ── Daily Shuffle ────────────────────────────────
+  // Deterministic shuffle seeded by date — same order for everyone on the same day,
+  // different order each day.
+  function seededRandom(seed) {
+    // Simple mulberry32 PRNG
+    return function() {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function getDaySeed() {
+    const now = new Date();
+    return now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+  }
+
+  function shuffleForToday(playlist, blockName) {
+    const seed = getDaySeed() + blockName.charCodeAt(0) * 1000;
+    const rng = seededRandom(seed);
+    const shuffled = [...playlist].filter(v => !removedVideos.has(v.id));
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+
+  // ── Schedule Engine ─────────────────────────────
+  // Given a playlist and elapsed seconds since block start,
+  // figure out which video should be playing and at what offset.
+  // Bumps are inserted between each video.
+  function computeSchedulePosition(playlist, elapsedSec) {
+    // Build a timeline: [video, bump, video, bump, ...]
+    let totalCycleDuration = 0;
+    for (const v of playlist) {
+      totalCycleDuration += v.duration + BUMP_DURATION;
+    }
+
+    // Where are we in the cycle?
+    const posInCycle = ((elapsedSec % totalCycleDuration) + totalCycleDuration) % totalCycleDuration;
+
+    let cursor = 0;
+    for (let i = 0; i < playlist.length; i++) {
+      const video = playlist[i];
+
+      // Video segment
+      if (posInCycle < cursor + video.duration) {
+        return {
+          type: 'video',
+          video: video,
+          index: i,
+          seekTo: posInCycle - cursor,
+          remainingSec: video.duration - (posInCycle - cursor),
+        };
+      }
+      cursor += video.duration;
+
+      // Bump segment
+      if (posInCycle < cursor + BUMP_DURATION) {
+        return {
+          type: 'bump',
+          nextVideo: playlist[(i + 1) % playlist.length],
+          nextIndex: (i + 1) % playlist.length,
+          remainingSec: BUMP_DURATION - (posInCycle - cursor),
+        };
+      }
+      cursor += BUMP_DURATION;
+    }
+
+    // Shouldn't get here, but fallback
+    return { type: 'video', video: playlist[0], index: 0, seekTo: 0, remainingSec: playlist[0].duration };
+  }
 
   function syncToSchedule() {
     const block = getCurrentBlock();
@@ -86,7 +220,7 @@ import {
     if (!playlist || !playlist.length) return;
 
     // Shuffle playlist deterministically for today
-    const todaysPlaylist = shuffleForToday(playlist, block.name, removedVideos);
+    const todaysPlaylist = shuffleForToday(playlist, block.name);
 
     $blockLabel.textContent = block.label;
 
@@ -129,11 +263,11 @@ import {
     // instead of a blank player, and loadVideoById may not recover.
     const block = getCurrentBlock();
     const playlist = playlists[block.name];
-    let initialVideoId = undefined;
+    let initialVideoId;
     let initialStart = 0;
 
     if (playlist && playlist.length) {
-      const todaysPlaylist = shuffleForToday(playlist, block.name, removedVideos);
+      const todaysPlaylist = shuffleForToday(playlist, block.name);
       const blockStart = getBlockStartTime(block);
       const elapsed = (new Date() - blockStart) / 1000;
       const pos = computeSchedulePosition(todaysPlaylist, elapsed);
@@ -141,7 +275,7 @@ import {
         initialVideoId = pos.video.id;
         initialStart = Math.floor(pos.seekTo);
       } else if (pos.nextVideo) {
-        // We're in a bump — load the next video paused, bump overlay will cover it
+        // We're mid-bump — load the next video paused behind the bump overlay.
         initialVideoId = pos.nextVideo.id;
         initialStart = 0;
       }
@@ -156,7 +290,9 @@ import {
         disablekb: 1,
         fs: 0,
         iv_load_policy: 3,
+        modestbranding: 1,
         rel: 0,
+        showinfo: 0,
         mute: 1,
         origin: window.location.origin,
       },
@@ -285,7 +421,18 @@ import {
   }
 
   // ── Bump Cards ──────────────────────────────────
-  // getBumpMessage imported from engine.js
+  function getBumpMessage(blockName) {
+    const now = new Date();
+    const timeStr = formatTime(now);
+
+    // Pick from block-specific or general pool
+    const pool = [];
+    if (bumps[blockName]) pool.push(...bumps[blockName]);
+    if (bumps.general) pool.push(...bumps.general);
+
+    const msg = pool[Math.floor(Math.random() * pool.length)];
+    return msg.replace('[time]', timeStr);
+  }
 
   // ── Bump Audio ───────────────────────────────────
   const BUMP_AUDIO_COUNT = 23;
@@ -311,6 +458,93 @@ import {
     }
   }
 
+  // ── TV Guide bump ────────────────────────────────
+  function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  // Three half-hour slot labels starting from the current half hour.
+  function guideSlots() {
+    const base = new Date();
+    base.setSeconds(0, 0);
+    base.setMinutes(base.getMinutes() < 30 ? 0 : 30);
+    const slots = [];
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(base.getTime() + i * 30 * 60000);
+      const h = d.getHours() % 12 || 12;
+      const m = d.getMinutes().toString().padStart(2, '0');
+      slots.push(`${h}:${m}`);
+    }
+    return slots;
+  }
+
+  function pickShows(pool, n, used) {
+    const out = [];
+    let guard = 0;
+    while (out.length < n && guard < 200) {
+      const s = pool[Math.floor(Math.random() * pool.length)];
+      if (!used.has(s)) { used.add(s); out.push(s); }
+      guard++;
+    }
+    while (out.length < n) out.push('—');
+    return out;
+  }
+
+  function shuffled(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // Returns true if the guide was rendered, false to fall back to a text bump.
+  function renderGuide(blockName) {
+    const g = bumps.guide;
+    if (!g || !Array.isArray(g.channels) || !Array.isArray(g.shows) || !g.shows.length) return false;
+
+    const blockLabel = (BLOCKS.find(b => b.name === blockName) || {}).label || 'now';
+    const slots = guideSlots();
+
+    const real = g.channels.filter(c => c.real).slice(0, 1);
+    const rest = shuffled(g.channels.filter(c => !c.real)).slice(0, 4);
+    const chosen = [...real, ...rest];
+    if (!chosen.length) return false;
+
+    const used = new Set();
+    let html = '<div class="guide-row guide-timerow"><span class="guide-cell guide-corner">CH</span>';
+    for (const s of slots) html += `<span class="guide-cell guide-time">${escHtml(s)}</span>`;
+    html += '</div>';
+
+    for (const ch of chosen) {
+      html += `<div class="guide-row"><span class="guide-cell guide-chan"><b>${escHtml(ch.num || '')}</b> ${escHtml(ch.name || '')}</span>`;
+      let cells;
+      if (ch.real) {
+        // Ground the real channel in the actual current block.
+        cells = [`${blockLabel} programming`, ...pickShows(g.shows, 2, used)];
+      } else {
+        cells = pickShows(g.shows, 3, used);
+      }
+      cells.forEach((c, ci) => {
+        html += `<span class="guide-cell guide-show${ci === 0 ? ' now' : ''}">${escHtml(c)}</span>`;
+      });
+      html += '</div>';
+    }
+
+    $guideGrid.innerHTML = html;
+    if ($guideClock) $guideClock.textContent = formatTime(new Date());
+    if ($guideTicker) {
+      const t = (g.ticker && g.ticker.length) ? g.ticker[Math.floor(Math.random() * g.ticker.length)] : '';
+      // Triple it so the marquee can scroll without a visible gap.
+      $guideTicker.textContent = `${t}   ${t}   ${t}`;
+    }
+    return true;
+  }
+
+  // ── Bump show/hide ───────────────────────────────
   function showBump(blockName, remainingSec) {
     if (isShowingBump) return;
     isShowingBump = true;
@@ -320,8 +554,13 @@ import {
       player.pauseVideo();
     }
 
-    const message = getBumpMessage(blockName, bumps);
-    $bumpText.textContent = message;
+    // Occasionally run the TV guide instead of a plain text card.
+    if (Math.random() < GUIDE_CHANCE && renderGuide(blockName)) {
+      $bump.classList.add('guide-mode');
+    } else {
+      $bumpText.textContent = getBumpMessage(blockName);
+    }
+
     $bump.classList.add('active');
     playBumpAudio();
     currentVideoId = null; // force reload after bump
@@ -330,6 +569,7 @@ import {
   function hideBump() {
     if (!isShowingBump) return;
     $bump.classList.remove('active');
+    $bump.classList.remove('guide-mode');
     stopBumpAudio();
     isShowingBump = false;
   }
@@ -389,6 +629,23 @@ import {
       hideBump();
       syncToSchedule();
     }, BUMP_DURATION * 1000);
+  };
+
+  // Force the TV guide for testing: testGuide() or testGuide(20) to hold 20s.
+  window.testGuide = function(seconds) {
+    const block = getCurrentBlock();
+    if (isShowingBump) hideBump();
+    isShowingBump = true;
+    if (playerReady && player.getPlayerState && player.getPlayerState() === 1) player.pauseVideo();
+    if (renderGuide(block.name)) {
+      $bump.classList.add('guide-mode');
+    } else {
+      $bumpText.textContent = getBumpMessage(block.name);
+    }
+    $bump.classList.add('active');
+    playBumpAudio();
+    currentVideoId = null;
+    setTimeout(() => { hideBump(); syncToSchedule(); }, (seconds || BUMP_DURATION) * 1000);
   };
 
   // ── Go ──────────────────────────────────────────

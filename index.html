@@ -29,6 +29,17 @@
   <!-- Bump interstitial -->
   <div id="bump">
     <p id="bump-text"></p>
+
+    <!-- TV guide bump (shown occasionally instead of a text card) -->
+    <div id="bump-guide" aria-hidden="true">
+      <div class="guide-head">
+        <span class="guide-logo">snow-globe</span>
+        <span class="guide-title">PROGRAM GUIDE</span>
+        <span class="guide-clock"></span>
+      </div>
+      <div class="guide-grid"></div>
+      <div class="guide-ticker"><span></span></div>
+    </div>
   </div>
 
   <!-- CRT effects -->
@@ -43,6 +54,6 @@
   <button id="mute-btn" title="toggle sound">🔇</button>
   <div id="unmute-hint">click anywhere for sound</div>
 
-  <script type="module" src="app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
