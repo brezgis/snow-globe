@@ -54,6 +54,25 @@
   <button id="mute-btn" title="toggle sound">🔇</button>
   <div id="unmute-hint">click anywhere for sound</div>
 
+  <!-- snow-guide: a liftable printed program guide over the live video -->
+  <button id="guide-btn" title="snow-guide — the program guide" aria-label="open the program guide">
+    <span class="sg-logo"><b>snow</b><i>guide</i></span>
+  </button>
+  <div id="guidesheet" aria-hidden="true">
+    <div class="sheet" role="dialog" aria-label="snow-guide program guide">
+      <div class="sheet-mast">
+        <span class="sg-logo sg-logo--big"><b>snow</b><i>guide</i></span>
+        <div class="mast-meta">
+          <div class="mast-title">PROGRAM&nbsp;GUIDE</div>
+          <div class="mast-sub"></div>
+        </div>
+        <button class="sheet-close" aria-label="close the guide">&times;</button>
+      </div>
+      <div class="sheet-cols"></div>
+      <div class="sheet-foot">all times approximate &middot; all shows imaginary &middot; you cannot change the channel &middot; that is the channel</div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

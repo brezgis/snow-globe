@@ -52,6 +52,12 @@
       toggleMute();
     });
 
+    setupGuideSheet();
+    setupIdleUI();
+
+    // open the snow-guide directly via /#sheet (handy for linking / previews)
+    if (location.hash === '#sheet') setTimeout(sgOpen, 300);
+
     // show UI labels briefly on load
     setTimeout(() => {
       $blockLabel.classList.add('visible');
@@ -647,6 +653,146 @@
     currentVideoId = null;
     setTimeout(() => { hideBump(); syncToSchedule(); }, (seconds || BUMP_DURATION) * 1000);
   };
+
+  // ── snow-guide: liftable printed program guide ──
+  const SG_FAKE_COUNT = 5;     // nonsense channels shown alongside the real one
+  const SG_SWAP_CHANCE = 0.3;  // odds a given slot flips to a different channel on reopen
+  let sgSlots = null;          // which fake channels are currently on the page
+
+  function sgEsc(s) {
+    return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  }
+  // 24h "HH.MM" to match the European printed-guide look
+  function sgTime(d) {
+    return String(d.getHours()).padStart(2, '0') + '.' + String(d.getMinutes()).padStart(2, '0');
+  }
+  // pull a clean name (+ optional "network") out of a long YouTube title
+  function sgSplitTitle(title) {
+    const parts = String(title).split('|').map(s => s.trim()).filter(Boolean);
+    let name = parts[0] || String(title);
+    let net = parts.length > 1 ? parts[parts.length - 1] : '';
+    if (net && net.length > 16) net = '';
+    if (name.length > 50) name = name.slice(0, 48).replace(/[\s\-–—:,]+$/, '') + '…';
+    return { name, net };
+  }
+  // CH 01 — genuinely accurate: the live schedule, now + what's coming and when
+  function sgRealChannel(count) {
+    const block = getCurrentBlock();
+    const pl = playlists[block.name];
+    if (!pl || !pl.length) return null;
+    const today = shuffleForToday(pl, block.name);
+    const now = new Date();
+    const elapsed = (now - getBlockStartTime(block)) / 1000;
+    const pos = computeSchedulePosition(today, elapsed);
+    let idx, startMs, liveRow;
+    if (pos.type === 'video') {
+      idx = pos.index; startMs = now.getTime() - (pos.video.duration - pos.remainingSec) * 1000; liveRow = 0;
+    } else {
+      idx = pos.nextIndex; startMs = now.getTime() + pos.remainingSec * 1000; liveRow = -1;
+    }
+    const rows = []; let t = startMs;
+    for (let k = 0; k < count; k++) {
+      const v = today[(idx + k) % today.length];
+      const s = sgSplitTitle(v.title);
+      rows.push({ time: sgTime(new Date(t)), title: s.name, net: s.net, now: k === liveRow });
+      t += (v.duration + BUMP_DURATION) * 1000;
+    }
+    return { num: '01', name: 'SNOW-GLOBE', real: true, rows };
+  }
+  // the nonsense channels — a deterministic-per-day printed schedule
+  function sgFakeChannel(ch, count) {
+    const shows = (bumps.guide && bumps.guide.shows) || [];
+    if (!shows.length) return { num: ch.num, name: ch.name, rows: [] };
+    const rand = seededRandom(getDaySeed() + (parseInt(ch.num, 10) || 1) * 131 + 17);
+    const now = new Date();
+    const t = new Date(now); t.setMinutes(0, 0, 0); t.setHours(t.getHours() - 1);
+    const rows = []; const recent = []; let cur = t.getTime();
+    for (let k = 0; k < count; k++) {
+      let s, tries = 0;
+      do { s = shows[Math.floor(rand() * shows.length)]; tries++; } while (recent.includes(s) && tries < 8);
+      recent.push(s); if (recent.length > 3) recent.shift();
+      const dur = [30, 30, 60, 60, 90][Math.floor(rand() * 5)];
+      const start = new Date(cur), end = new Date(cur + dur * 60000);
+      rows.push({ time: sgTime(start), title: s, now: now >= start && now < end });
+      cur = end.getTime();
+    }
+    return { num: ch.num, name: ch.name, rows };
+  }
+  function sgChannelHTML(c) {
+    const lis = c.rows.map(r =>
+      `<li${r.now ? ' class="now"' : ''}><b>${sgEsc(r.time)}</b> <span>${sgEsc(r.title)}` +
+      `${r.net ? ` <em>(${sgEsc(r.net)})</em>` : ''}</span></li>`).join('');
+    return `<div class="chan${c.real ? ' chan--real' : ''}">` +
+      `<h3><span class="cn">${sgEsc(c.num)}</span> ${sgEsc(c.name)}` +
+      `${c.real ? ' <span class="live">▶ now</span>' : ''}</h3><ul class="prog">${lis}</ul></div>`;
+  }
+  // pick the 5 nonsense channels: stable across opens, but each slot has a small
+  // chance of flipping to a different channel each time you lift the sheet again
+  function sgPickSlots() {
+    const pool = bumps.guide.channels.filter(c => !c.real);
+    if (!sgSlots) {
+      const s = [...pool];
+      for (let i = s.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [s[i], s[j]] = [s[j], s[i]]; }
+      sgSlots = s.slice(0, SG_FAKE_COUNT);
+      return;
+    }
+    const shown = new Set(sgSlots.map(c => c.num));
+    sgSlots = sgSlots.map(c => {
+      if (Math.random() < SG_SWAP_CHANCE) {
+        const candidates = pool.filter(p => !shown.has(p.num));
+        if (candidates.length) {
+          const pick = candidates[Math.floor(Math.random() * candidates.length)];
+          shown.delete(c.num); shown.add(pick.num);
+          return pick;
+        }
+      }
+      return c;
+    });
+  }
+  function sgBuild() {
+    const cols = document.querySelector('#guidesheet .sheet-cols');
+    if (!cols || !bumps.guide) return;
+    const now = new Date();
+    const sub = document.querySelector('#guidesheet .mast-sub');
+    if (sub) {
+      sub.textContent = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+        .toLowerCase() + ' · ' + formatTime(now);
+    }
+    sgPickSlots();
+    const fakes = [...sgSlots].sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0));
+    let html = '';
+    const real = sgRealChannel(6);
+    if (real) html += sgChannelHTML(real);
+    for (const ch of fakes) html += sgChannelHTML(sgFakeChannel(ch, 6));
+    cols.innerHTML = html;
+  }
+  function sgOpen()  { const g = document.getElementById('guidesheet'); if (!g) return; sgBuild(); g.classList.add('open'); g.setAttribute('aria-hidden', 'false'); }
+  function sgClose() { const g = document.getElementById('guidesheet'); if (!g) return; g.classList.remove('open'); g.setAttribute('aria-hidden', 'true'); }
+  function sgToggle(){ const g = document.getElementById('guidesheet'); if (!g) return; g.classList.contains('open') ? sgClose() : sgOpen(); }
+  function setupGuideSheet() {
+    const btn = document.getElementById('guide-btn');
+    if (btn) btn.addEventListener('click', e => { e.stopPropagation(); sgToggle(); });
+    const g = document.getElementById('guidesheet');
+    if (g) {
+      g.addEventListener('click', e => { e.stopPropagation(); if (e.target === g) sgClose(); });
+      const sheet = g.querySelector('.sheet'); if (sheet) sheet.addEventListener('click', e => e.stopPropagation());
+      const cb = g.querySelector('.sheet-close'); if (cb) cb.addEventListener('click', e => { e.stopPropagation(); sgClose(); });
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') sgClose(); });
+  }
+  window.testGuideSheet = sgOpen; // open from console for previewing
+
+  // the bottom buttons (mute + guide) fade in on mouse activity, out when idle
+  function setupIdleUI() {
+    let t;
+    const wake = () => {
+      document.body.classList.add('ui-awake');
+      clearTimeout(t);
+      t = setTimeout(() => document.body.classList.remove('ui-awake'), 2800);
+    };
+    ['mousemove', 'mousedown', 'touchstart', 'keydown'].forEach(ev =>
+      document.addEventListener(ev, wake, { passive: true }));
+  }
 
   // ── Go ──────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', init);
