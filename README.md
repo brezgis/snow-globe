@@ -4,6 +4,10 @@ A personal internet TV station. You don't choose — that's the point.
 
 Curated YouTube playlists, time-synced so everyone watching sees the same thing. Adult Swim-style bump cards between videos. Different programming by time of day. Reshuffled daily. No algorithm, no recommendations, no feed. Just television.
 
+**Live at [tv.brezgis.com](https://tv.brezgis.com).**
+
+![snow-globe mid-broadcast — afternoon block](docs/screenshot.png)
+
 ## The idea
 
 Everything is separate now. You scroll alone, you choose alone, your feed is yours and nobody else's. snow-globe is a tiny act of resistance: a shared broadcast where you tune in and watch whatever's on, like we used to.
@@ -20,7 +24,18 @@ The playlist is deterministic and keyed to the clock. No server, no streaming �
 | 🌆 Evening | 6–10 PM | Curated gems | Feynman lectures, Tiny Desk Concerts, Nina Simone live, Coltrane, Carl Sagan |
 | 🌙 Late Night | 10 PM–2 AM | Strange & beautiful | Švankmajer, Maya Deren, Norman McLaren, Soviet animation, vintage Sesame Street sketches, Philip Glass |
 
-**126 videos. 65+ hours of content.** Reshuffled daily — same videos, new order each day.
+**126 videos. 70+ hours of content.** Reshuffled daily — same videos, new order each day.
+
+## Quickstart
+
+Pure static site — no build step, no dependencies. It just needs a local server (the YouTube embed API doesn't like `file://`):
+
+```bash
+git clone https://github.com/brezgis/snow-globe.git
+cd snow-globe
+python3 -m http.server 8765
+# open http://localhost:8765
+```
 
 ## Curation philosophy
 
@@ -47,7 +62,7 @@ The playlist is deterministic and keyed to the clock. No server, no streaming �
 │  Load YouTube video, seek to exact spot  │
 │  ↓                                       │
 │  Between videos: show bump card          │
-│  (black screen, white text, 20 seconds)  │
+│  (black screen, white text, 12 seconds)  │
 │  ↓                                       │
 │  Repeat                                  │
 └──────────────────────────────────────────┘
@@ -57,7 +72,7 @@ No backend. No database. No streaming server. Pure static site — HTML, CSS, JS
 
 ## Bumps
 
-20-second interstitials between videos. Black screen, white text, gentle. Time-aware — different pools for each time block.
+12-second interstitials between videos. Black screen, white text, gentle. Time-aware — different pools for each time block.
 
 > *"you're watching a website pretend to be a TV. we're both okay with this."*
 >
@@ -73,7 +88,7 @@ No backend. No database. No streaming server. Pure static site — HTML, CSS, JS
 snow-globe/
 ├── index.html              # The page
 ├── style.css               # CRT aesthetic, scanlines, vignette
-├── app.js                  # Schedule engine, player, bumps
+├── app.js                  # Schedule logic, YouTube player, bumps
 ├── bumps.json              # Bump text pools (general + per-block)
 ├── playlists/
 │   ├── morning.json        # ☀️ Nature, cooking, crafts
@@ -115,9 +130,6 @@ Push to GitHub Pages or drop on any static file server. No build step, no depend
 ```bash
 # GitHub Pages: just push to a repo with Pages enabled
 git push origin main
-
-# Local dev server
-python3 -m http.server 8765
 ```
 
 ## TV Guide
