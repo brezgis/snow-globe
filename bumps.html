@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>snow-globe · bump reel</title>
+  <meta name="description" content="every bump on snow-globe, in one place.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>❄</text></svg>">
+  <style>
+    html, body { overflow: auto; height: auto; min-height: 100%; cursor: default; background: #070707; }
+    body { padding: 28px 16px 64px; }
+
+    .reel { max-width: 1080px; margin: 0 auto; }
+
+    .reel-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+      font-family: 'Space Mono', monospace; font-size: 12px; letter-spacing: .14em;
+      color: #6f6f6f; text-transform: lowercase; margin-bottom: 14px;
+    }
+    .reel-head b { color: #d8d8d8; font-weight: 700; letter-spacing: .16em; }
+    .reel-head a { color: #6f6f6f; text-decoration: none; border-bottom: 1px solid #333; }
+    .reel-head a:hover { color: #d8d8d8; }
+
+    /* the set: a dark bezel around a 16:9 screen */
+    .set {
+      background: linear-gradient(180deg, #1b1a18, #121110);
+      border-radius: 22px; padding: 18px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.05);
+    }
+    .screen {
+      position: relative; aspect-ratio: 16 / 9; background: #000; overflow: hidden;
+      border-radius: 14px / 18px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
+    }
+    .screen .sg-stage { opacity: 1; transition: opacity .5s ease; }
+    .screen.switching .sg-stage { opacity: 0; transition: opacity .25s ease; }
+    .screen::before {             /* scanlines */
+      content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+    }
+    .screen::after {              /* curved-glass vignette */
+      content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+      background: radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,.55) 100%);
+    }
+    .screen:fullscreen { border-radius: 0; aspect-ratio: auto; width: 100vw; height: 100vh; }
+    .sound-hint {
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5;
+      font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: .12em; color: rgba(255,255,255,.45);
+      pointer-events: none; transition: opacity .6s ease; white-space: nowrap;
+    }
+    .sound-hint.gone { opacity: 0; }
+    .bug {                        /* the little channel mark in the corner */
+      position: absolute; right: 18px; bottom: 14px; z-index: 5; pointer-events: none;
+      font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .15em; color: rgba(255,255,255,.14);
+    }
+
+    .progress { height: 2px; background: #222; margin: 14px 4px 0; border-radius: 2px; overflow: hidden; }
+    .progress i { display: block; height: 100%; width: 0; background: #e6e6e6; }
+
+    .bar {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 12px 4px 0;
+    }
+    .now { flex: 1 1 240px; min-width: 0; }
+    .now-num { font-family: 'Space Mono', monospace; font-size: 11px; color: #6f6f6f; letter-spacing: .14em; }
+    .now-name { font-size: 22px; font-weight: 600; color: #f0f0f0; margin-top: 2px; }
+    .now-desc { font-size: 14px; color: #8d8d8d; font-weight: 300; margin-top: 2px; }
+
+    .ctl { display: flex; gap: 6px; flex-wrap: wrap; }
+    .ctl button {
+      font-family: 'Space Mono', monospace; font-size: 12px; letter-spacing: .06em; text-transform: lowercase;
+      color: #cfcfcf; background: #151515; border: 1px solid #2a2a2a; border-radius: 8px;
+      padding: 9px 12px; min-height: 40px; cursor: pointer; transition: background .15s, border-color .15s, color .15s;
+    }
+    .ctl button:hover { background: #1e1e1e; border-color: #3a3a3a; color: #fff; }
+    .ctl button[aria-pressed="true"] { color: #000; background: #e6e6e6; border-color: #e6e6e6; }
+    .ctl button:focus-visible, .tile:focus-visible { outline: 2px solid #9fb6c8; outline-offset: 2px; }
+
+    .keys { font-family: 'Space Mono', monospace; font-size: 11px; color: #555; padding: 10px 4px 0; letter-spacing: .04em; }
+    .keys kbd { font-family: inherit; color: #888; border: 1px solid #2a2a2a; border-radius: 4px; padding: 0 5px; }
+
+    .tiles {
+      list-style: none; margin-top: 34px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;
+    }
+    .tile {
+      width: 100%; text-align: left; cursor: pointer; background: #0e0e0e; color: inherit;
+      border: 1px solid #1f1f1f; border-radius: 10px; padding: 12px 14px; font-family: inherit;
+      transition: border-color .15s, background .15s;
+    }
+    .tile:hover { border-color: #3a3a3a; background: #131313; }
+    .tile.on { border-color: #e6e6e6; background: #161616; }
+    .tile .n { font-family: 'Space Mono', monospace; font-size: 10px; color: #5c5c5c; letter-spacing: .14em; }
+    .tile .t { display: block; font-size: 15px; font-weight: 600; color: #e8e8e8; margin-top: 3px; }
+    .tile .d { display: block; font-size: 12.5px; font-weight: 300; color: #858585; margin-top: 3px; line-height: 1.4; }
+
+    @media (max-width: 600px) {
+      body { padding: 16px 12px 48px; }
+      .set { padding: 8px; border-radius: 14px; }
+      .now-name { font-size: 18px; }
+      .keys { display: none; }
+      /* bumps are built to fill a whole screen; a 16:9 strip is too short here */
+      .screen { aspect-ratio: 4 / 5; }
+      .bug { display: none; }
+      .reel-head .long { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="reel">
+    <div class="reel-head">
+      <span><b>snow-globe</b> · bump reel</span>
+      <a href="./"><span class="long">back to the </span>channel →</a>
+    </div>
+
+    <div class="set">
+      <div class="screen" id="tv">
+        <div class="sg-stage" id="stage"></div>
+        <div class="sound-hint" id="hint">click anywhere for sound</div>
+        <div class="bug">snow-globe</div>
+      </div>
+    </div>
+
+    <div class="progress"><i id="prog"></i></div>
+
+    <div class="bar">
+      <div class="now">
+        <div class="now-num" id="num">01 / 22</div>
+        <div class="now-name" id="name"></div>
+        <div class="now-desc" id="desc"></div>
+      </div>
+      <div class="ctl">
+        <button id="prev" title="previous (←)">‹ prev</button>
+        <button id="again" title="again, re-rolled (r)">↻ again</button>
+        <button id="next" title="next (→)">next ›</button>
+        <button id="auto" aria-pressed="true" title="play all (space)">play all</button>
+        <button id="shuf" aria-pressed="false" title="shuffle (s)">shuffle</button>
+        <button id="mute" aria-pressed="false" title="sound (m)">sound on</button>
+        <button id="full" title="fullscreen (f)">fullscreen</button>
+      </div>
+    </div>
+    <div class="keys"><kbd>←</kbd> <kbd>→</kbd> browse · <kbd>r</kbd> again · <kbd>space</kbd> play all · <kbd>s</kbd> shuffle · <kbd>m</kbd> sound · <kbd>f</kbd> fullscreen</div>
+
+    <ul class="tiles" id="tiles"></ul>
+  </main>
+
+  <script src="bumps.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    const BUMP_SECONDS = 12;
+    const ABOUT = {
+      card:       ['text card', 'the classic: black screen, a line of white text.'],
+      typewriter: ['typewriter', 'someone is typing to you. keys, and a carriage bell.'],
+      mail:       ['viewer mail', 'letters from viewers, over a music box.'],
+      chat:       ['two voices', 'a short conversation in the dark.'],
+      globe:      ['snow globe', 'a little house, shaken. the snow settles.'],
+      inkblot:    ['inkblot', 'it is always a moth.'],
+      sheep:      ['counting sheep', 'from somewhere in the thousands.'],
+      testcard:   ['test card', 'color bars and a 1 kHz tone. this is only a test.'],
+      moon:       ['light to the moon', '1.28 seconds, in real time.'],
+      fish:       ['the fish', 'he eats the sentence.'],
+      credits:    ['end credits', 'for nothing in particular.'],
+      count:      ['pinball count', 'one to twelve. that\'s all the numbers.'],
+      eyes:       ['eyes', 'they follow your cursor. don\'t mind them.'],
+      forecast:   ['local forecast', 'the weather for your apartment.'],
+      emergency:  ['emergency feelings system', 'this is only a test. silent on purpose.'],
+      period:     ['the end of television', 'not really.'],
+      rule30:     ['rule 30', 'a cellular automaton, played as a melody.'],
+      lettersnow: ['letter snow', 'it snowed letters, and they spelled something.'],
+      phone:      ['the phone', 'it\'s for you.'],
+      clock:      ['the clock', 'briefly confused.'],
+      recursion:  ['tv in a tv', 'you are here.'],
+      scope:      ['oscilloscope', 'what the chord you\'re hearing looks like.'],
+    };
+
+    const bumps = window.SG_BUMPS || [];
+    const $ = id => document.getElementById(id);
+    const stage = $('stage'), screen = $('tv');
+    let idx = 0, auto = true, shuffle = false, muted = false;
+    let api = null, advanceT = null, startedAt = 0, audioCtx = null, textPools = null;
+
+    // text-card copy, same pools as the channel
+    fetch('bumps.json').then(r => r.json()).then(d => { textPools = d; }).catch(() => {});
+    const fmtTime = d => { let h = d.getHours(); const m = String(d.getMinutes()).padStart(2, '0');
+      const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}:${m}${ap}`; };
+    function message() {
+      if (!textPools) return 'nobody chose this. that\'s the point.';
+      const all = Object.values(textPools).filter(Array.isArray).flat();
+      return all[Math.floor(Math.random() * all.length)].replace('[time]', fmtTime(new Date()));
+    }
+
+    function unlock() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      } catch (e) { audioCtx = null; }
+      $('hint').classList.add('gone');
+    }
+
+    // ── tiles ──
+    const tiles = $('tiles');
+    bumps.forEach((b, i) => {
+      const [t, d] = ABOUT[b.id] || [b.id, ''];
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.className = 'tile'; btn.dataset.i = i;
+      btn.innerHTML = `<span class="n">${String(i + 1).padStart(2, '0')}</span><span class="t"></span><span class="d"></span>`;
+      btn.querySelector('.t').textContent = t; btn.querySelector('.d').textContent = d;
+      btn.addEventListener('click', () => { unlock(); play(i); screen.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+      li.appendChild(btn); tiles.appendChild(li);
+    });
+
+    // ── playing ──
+    function play(i) {
+      idx = (i + bumps.length) % bumps.length;
+      const b = bumps[idx];
+      clearTimeout(advanceT);
+      screen.classList.add('switching');
+      if (api) { api.dispose(); api = null; }
+      setTimeout(() => {
+        stage.innerHTML = '';
+        screen.classList.remove('switching');
+        api = window.SG_playBump(b, stage, {
+          audioCtx, muted, block: 'latenight', time: fmtTime(new Date()), message,
+        });
+        startedAt = performance.now();
+        if (auto) advanceT = setTimeout(() => play(nextIndex()), BUMP_SECONDS * 1000);
+      }, 260);
+
+      const [t, d] = ABOUT[b.id] || [b.id, ''];
+      $('num').textContent = `${String(idx + 1).padStart(2, '0')} / ${bumps.length}`;
+      $('name').textContent = t; $('desc').textContent = d;
+      document.querySelectorAll('.tile').forEach(el => el.classList.toggle('on', +el.dataset.i === idx));
+      history.replaceState(null, '', '#' + b.id);
+    }
+    function nextIndex() {
+      if (!shuffle) return idx + 1;
+      let j; do { j = Math.floor(Math.random() * bumps.length); } while (bumps.length > 1 && j === idx);
+      return j;
+    }
+
+    // progress bar for the 12-second slot
+    (function tick() {
+      const p = startedAt ? Math.min(1, (performance.now() - startedAt) / (BUMP_SECONDS * 1000)) : 0;
+      $('prog').style.width = (p * 100) + '%';
+      requestAnimationFrame(tick);
+    })();
+
+    // ── controls ──
+    const setPressed = (el, on) => el.setAttribute('aria-pressed', on ? 'true' : 'false');
+    function toggleAuto() {
+      auto = !auto; setPressed($('auto'), auto);
+      clearTimeout(advanceT);
+      if (auto) {
+        const left = BUMP_SECONDS * 1000 - (performance.now() - startedAt);
+        advanceT = setTimeout(() => play(nextIndex()), Math.max(400, left));
+      }
+    }
+    function toggleMute() {
+      muted = !muted; setPressed($('mute'), muted);
+      $('mute').textContent = muted ? 'sound off' : 'sound on';
+      if (!muted) unlock();
+      play(idx);  // restart so the new sound setting takes
+    }
+    function toggleFull() {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (screen.requestFullscreen) screen.requestFullscreen();
+    }
+    // canvases are sized when a bump starts, so restart on resize/fullscreen
+    document.addEventListener('fullscreenchange', () => setTimeout(() => play(idx), 120));
+    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => play(idx), 300); });
+
+    $('prev').onclick = () => { unlock(); play(idx - 1); };
+    $('next').onclick = () => { unlock(); play(idx + 1); };
+    $('again').onclick = () => { unlock(); play(idx); };
+    $('auto').onclick = () => { unlock(); toggleAuto(); };
+    $('shuf').onclick = () => { shuffle = !shuffle; setPressed($('shuf'), shuffle); };
+    $('mute').onclick = toggleMute;
+    $('full').onclick = () => { unlock(); toggleFull(); };
+    screen.addEventListener('click', () => { const wasLocked = !audioCtx; unlock(); if (wasLocked && !muted) play(idx); });
+
+    document.addEventListener('keydown', e => {
+      if (e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
+      const k = e.key.toLowerCase();
+      if (k === 'arrowright') { unlock(); play(idx + 1); }
+      else if (k === 'arrowleft') { unlock(); play(idx - 1); }
+      else if (k === 'r') { unlock(); play(idx); }
+      else if (k === ' ') { e.preventDefault(); unlock(); toggleAuto(); }
+      else if (k === 's') { shuffle = !shuffle; setPressed($('shuf'), shuffle); }
+      else if (k === 'm') toggleMute();
+      else if (k === 'f') { unlock(); toggleFull(); }
+      else return;
+    });
+
+    // start at #id if given
+    const start = bumps.findIndex(b => '#' + b.id === location.hash);
+    play(start >= 0 ? start : 0);
+  })();
+  </script>
+</body>
+</html>

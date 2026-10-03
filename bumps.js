@@ -497,7 +497,7 @@
     }
     // roll so the final card ("snow-globe") comes to rest mid-screen
     requestAnimationFrame(() => {
-      const dist = roll.offsetHeight + window.innerHeight * 0.5 - roll.lastElementChild.offsetHeight / 2;
+      const dist = roll.offsetHeight + stage.clientHeight * 0.5 - roll.lastElementChild.offsetHeight / 2;
       const anim = roll.animate([{ transform: 'translateY(0)' }, { transform: `translateY(${-dist}px)` }],
         { duration: 10500, easing: 'cubic-bezier(.25,.1,.45,1)', fill: 'forwards' });
       api.after(11800, () => anim.cancel());
@@ -533,7 +533,7 @@
     let look = { x: W / 2, y }, target = { x: W / 2, y }, blink = 0, nextBlink = 1200;
     const S = synth(api);
     for (let k = 0; k < 12; k++) { S.thump(0.18, 0.3 + k * 0.95, 60); S.thump(0.1, 0.3 + k * 0.95 + 0.22, 55); }
-    api.listen(window, 'mousemove', e => { target = { x: e.clientX, y: e.clientY }; });
+    api.listen(window, 'mousemove', e => { const r = stage.getBoundingClientRect(); target = { x: e.clientX - r.left, y: e.clientY - r.top }; });
     api.every(1700, () => { target = { x: rand(0, W), y: rand(0, H) }; });
     api.after(5000, () => caption(api, pick(['we\'re not watching you. we\'re watching with you.', 'don\'t mind us.', 'we just like the company.'])));
     api.frame((t, dt) => {
@@ -782,5 +782,83 @@
     });
   });
 
+  // ── runtime ──────────────────────────────────────────
+  // SG_playBump(bump, stage, opts) runs one bump in `stage` and returns its
+  // api; call api.dispose() to stop it. Every timer, frame, listener and
+  // sound goes through the api, so a bump can be cut off at any moment.
+  // opts: { audioCtx, muted, message(), time, block }
+  function playBump(b, stage, opts) {
+    opts = opts || {};
+    const timers = [], intervals = [], listeners = [], nodes = [];
+    let raf = 0, alive = true, master = null;
+    const actx = opts.audioCtx;
+    const sound = (!opts.muted && actx && actx.state === 'running') ? actx : null;
+    if (sound) {
+      master = sound.createGain();
+      master.gain.value = 0.9;
+      master.connect(sound.destination);
+    }
+    const api = {
+      block: opts.block || '',
+      time: opts.time || '',
+      message: opts.message || (() => '[snow-globe]'),
+      el(tag, cls, text, parent) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text != null) e.textContent = text;
+        (parent || stage).appendChild(e);
+        return e;
+      },
+      after(ms, fn) { timers.push(setTimeout(() => alive && fn(), ms)); },
+      every(ms, fn) { intervals.push(setInterval(() => alive && fn(), ms)); },
+      listen(target, ev, fn) { target.addEventListener(ev, fn); listeners.push([target, ev, fn]); },
+      frame(fn) {
+        let start = 0, last = 0;
+        const loop = (now) => {
+          if (!alive) return;
+          if (!start) start = last = now;
+          fn(now - start, Math.min(50, now - last));
+          last = now;
+          raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+      },
+      canvas() {
+        const c = document.createElement('canvas');
+        c.className = 'bs-canvas';
+        stage.appendChild(c);
+        const W = stage.clientWidth || window.innerWidth, H = stage.clientHeight || window.innerHeight;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
+        const ctx = c.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { c, ctx, W, H };
+      },
+      // Web Audio context + this bump's output bus (null when muted)
+      audio: sound ? { ctx: sound, out: master, track: n => (nodes.push(n), n) } : null,
+      dispose() {
+        if (!alive) return;
+        alive = false;
+        timers.forEach(clearTimeout); intervals.forEach(clearInterval);
+        cancelAnimationFrame(raf);
+        listeners.forEach(([t, ev, fn]) => t.removeEventListener(ev, fn));
+        if (master) {
+          const t = sound.currentTime;
+          master.gain.cancelScheduledValues(t);
+          master.gain.setValueAtTime(master.gain.value, t);
+          master.gain.linearRampToValueAtTime(0, t + 0.4);
+          setTimeout(() => { nodes.forEach(n => { try { n.stop(); } catch (e) {} }); master.disconnect(); }, 500);
+        }
+      },
+    };
+    try { b.run(stage, api); } catch (e) {
+      console.warn('bump failed:', b.id, e);
+      stage.innerHTML = '';
+      api.el('p', 'bs-card in', '[snow-globe]');
+    }
+    return api;
+  }
+
   window.SG_BUMPS = BUMPS;
+  window.SG_playBump = playBump;
 })();

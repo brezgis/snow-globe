@@ -74,7 +74,7 @@ No backend. No database. No streaming server. Pure static site — HTML, CSS, JS
 
 12-second interstitials between videos, in the spirit of Adult Swim bumps. There are 22 of them in `bumps.js`, all drawn live in the browser with their sound synthesized on the spot, and most re-roll their script each time. Among them: a snow globe that gets shaken, an inkblot that is always a moth, sheep being counted from somewhere in the thousands, a fish that eats the sentence, viewer mail, the Emergency Feelings System, the forecast for your apartment, light travelling to the moon in real time, rule 30, and plain text cards drawn from `bumps.json` (time-aware, with a pool per block).
 
-Preview one with `/#bump=sheep`, or run `testBump('sheep', 30)` in the console (`listBumps()` lists them).
+Watch them all in the **bump reel** at [`/bumps.html`](https://tv.brezgis.com/bumps.html) (play all, shuffle, re-roll, fullscreen; linked from the snow-guide's footer). On the channel itself, preview one with `/#bump=sheep`, or run `testBump('sheep', 30)` in the console (`listBumps()` lists them).
 
 The **snow-guide** button (bottom left) lifts a printed program guide over the video: the real schedule for the rest of this block and the next two.
 

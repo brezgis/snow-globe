@@ -465,75 +465,9 @@
     } catch (e) { audioCtx = null; }
   }
 
-  // ── Bump runtime ─────────────────────────────────
-  // Each bump in bumps.js gets an `api` whose timers, frames, listeners and
-  // sounds are all tracked here, so a bump can be cut off at any moment.
+  // ── Bump runtime (shared with bumps.html; lives in bumps.js) ──
   let activeBump = null;
   const recentBumpIds = [];
-
-  function makeBumpApi(blockName) {
-    const timers = [], intervals = [], listeners = [], nodes = [];
-    let raf = 0, alive = true, master = null;
-    const sound = (!isMuted && audioCtx && audioCtx.state === 'running') ? audioCtx : null;
-    if (sound) {
-      master = sound.createGain();
-      master.gain.value = 0.9;
-      master.connect(sound.destination);
-    }
-    const api = {
-      block: blockName,
-      time: formatTime(new Date()),
-      message: () => getBumpMessage(blockName),
-      el(tag, cls, text, parent) {
-        const e = document.createElement(tag);
-        if (cls) e.className = cls;
-        if (text != null) e.textContent = text;
-        (parent || $bumpStage).appendChild(e);
-        return e;
-      },
-      after(ms, fn) { timers.push(setTimeout(() => alive && fn(), ms)); },
-      every(ms, fn) { intervals.push(setInterval(() => alive && fn(), ms)); },
-      listen(target, ev, fn) { target.addEventListener(ev, fn); listeners.push([target, ev, fn]); },
-      frame(fn) {
-        let start = 0, last = 0;
-        const loop = (now) => {
-          if (!alive) return;
-          if (!start) start = last = now;
-          fn(now - start, Math.min(50, now - last));
-          last = now;
-          raf = requestAnimationFrame(loop);
-        };
-        raf = requestAnimationFrame(loop);
-      },
-      canvas() {
-        const c = document.createElement('canvas');
-        c.className = 'bs-canvas';
-        $bumpStage.appendChild(c);
-        const W = window.innerWidth, H = window.innerHeight;
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
-        const ctx = c.getContext('2d');
-        ctx.scale(dpr, dpr);
-        return { c, ctx, W, H };
-      },
-      // Web Audio context + this bump's output bus (null when muted)
-      audio: sound ? { ctx: sound, out: master, track: n => (nodes.push(n), n) } : null,
-      dispose() {
-        alive = false;
-        timers.forEach(clearTimeout); intervals.forEach(clearInterval);
-        cancelAnimationFrame(raf);
-        listeners.forEach(([t, ev, fn]) => t.removeEventListener(ev, fn));
-        if (master) {
-          const t = sound.currentTime;
-          master.gain.cancelScheduledValues(t);
-          master.gain.setValueAtTime(master.gain.value, t);
-          master.gain.linearRampToValueAtTime(0, t + 0.4);
-          setTimeout(() => { nodes.forEach(n => { try { n.stop(); } catch (e) {} }); master.disconnect(); }, 500);
-        }
-      },
-    };
-    return api;
-  }
 
   function chooseBump(id) {
     const all = window.SG_BUMPS || [];
@@ -552,14 +486,12 @@
     if (!b) return;
     recentBumpIds.push(b.id);
     if (recentBumpIds.length > 7) recentBumpIds.shift();
-    const api = makeBumpApi(blockName);
-    activeBump = { b, api };
     $bump.dataset.bump = b.id;
-    try { b.run($bumpStage, api); } catch (e) {
-      console.warn('bump failed:', b.id, e);
-      $bumpStage.innerHTML = '';
-      api.el('p', 'bs-card in', '[snow-globe]');
-    }
+    const api = window.SG_playBump(b, $bumpStage, {
+      audioCtx, muted: isMuted, block: blockName,
+      time: formatTime(new Date()), message: () => getBumpMessage(blockName),
+    });
+    activeBump = { b, api };
   }
 
   function stopBumpContent() {
