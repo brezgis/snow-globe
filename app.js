@@ -677,6 +677,16 @@
       g.addEventListener('click', e => { e.stopPropagation(); if (e.target === g) sgClose(); });
       const sheet = g.querySelector('.sheet'); if (sheet) sheet.addEventListener('click', e => e.stopPropagation());
       const cb = g.querySelector('.sheet-close'); if (cb) cb.addEventListener('click', e => { e.stopPropagation(); sgClose(); });
+      // easter egg: click the guide's logo three times quickly → the bump reel
+      const logo = g.querySelector('.sg-logo--big');
+      if (logo) {
+        let clicks = 0, reset;
+        logo.addEventListener('click', e => {
+          e.stopPropagation();
+          clicks++; clearTimeout(reset); reset = setTimeout(() => { clicks = 0; }, 600);
+          if (clicks >= 3) location.href = 'bumps.html';
+        });
+      }
     }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') sgClose(); });
   }
