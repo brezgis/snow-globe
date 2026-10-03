@@ -18,13 +18,13 @@ The playlist is deterministic and keyed to the clock. No server, no streaming �
 
 | Block | Hours | Vibe | What's on |
 |-------|-------|------|-----------|
-| 🌑 Dead Hours | 2–8 AM | Ambient | Slow TV train rides, rainy city walks, ISS footage, fireplaces |
-| ☀️ Morning | 8 AM–12 PM | Gentle | Nature footage, Japanese cooking, pottery, glass blowing, watercolors |
-| 🌤️ Afternoon | 12–6 PM | Interesting | James Burke's Connections, Bell Labs films, How It's Made, BBC Open University |
-| 🌆 Evening | 6–10 PM | Curated gems | Feynman lectures, Tiny Desk Concerts, Nina Simone live, Coltrane, Carl Sagan |
-| 🌙 Late Night | 10 PM–2 AM | Strange & beautiful | Švankmajer, Maya Deren, Norman McLaren, Soviet animation, vintage Sesame Street sketches, Philip Glass |
+| 🌑 Dead Hours | 2–8 AM | Ambient | NRK-style slow TV trains, a seven-hour London canal, the Apollo 11 moonwalk, Pages from Ceefax, rain at night |
+| ☀️ Morning | 8 AM–12 PM | Gentle | People making things (Haanstra's *Glas*, *Chairmaker*, Shoji Hamada, bookbinding), Painlevé, Zoo Quest, Mister Rogers, Rambalac walks |
+| 🌤️ Afternoon | 12–6 PM | Interesting | James Burke's Connections, Bell Labs & AT&T Archives, BBC Open University, Eames, Kievnauchfilm |
+| 🌆 Evening | 6–10 PM | Curated gems | Feynman, Sagan, Alan Watts, *Disappearing World*, Les Blank, Herzog, Nina Simone, Coltrane, Alice Coltrane, Monk, a few Tiny Desks |
+| 🌙 Late Night | 10 PM–2 AM | Strange & beautiful | Chris Marker, Švankmajer, Maya Deren, Brakhage, Fischinger, McLaren, Norstein, Zagreb Film, Nam June Paik, vintage Sesame Street |
 
-**126 videos. 70+ hours of content.** Reshuffled daily — same videos, new order each day.
+**137 videos. 80+ hours of content.** Reshuffled daily — same videos, new order each day. Durations are exact (checked against YouTube), because the whole schedule is computed from them.
 
 ## Quickstart
 
@@ -72,13 +72,15 @@ No backend. No database. No streaming server. Pure static site — HTML, CSS, JS
 
 ## Bumps
 
-12-second interstitials between videos. Black screen, white text, gentle. Time-aware — different pools for each time block.
+12-second interstitials between videos, Adult Swim style: black screen, white text. About half are text cards (time-aware, with different pools for each block); the rest are "next / later" cards showing what's actually coming up.
+
+The **snow-guide** button (bottom left) lifts a printed program guide over the video: the real schedule for the rest of this block and the next two.
 
 > *"you're watching a website pretend to be a TV. we're both okay with this."*
 >
 > *"nobody chose this. that's the point."*
 >
-> *"it's 2:47 AM. why are you still up?"*
+> *"it's 2:47 AM. this stays between us."*
 >
 > *"the best things you'll ever see are things you didn't search for."*
 

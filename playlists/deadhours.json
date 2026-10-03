@@ -1,11 +1,52 @@
 [
-  { "id": "xisVS_DKpJg", "title": "Slow TV: Train Ride Bergen to Oslo", "duration": 27000 },
-  { "id": "3rDjPLvOShM", "title": "Train Journey to the Norwegian Arctic Circle", "duration": 36000 },
-  { "id": "dGy_6qyyY7c", "title": "4K Heavy Rain Walk at Night in Tokyo", "duration": 1800 },
-  { "id": "joGYoligvWU", "title": "3 Hours Heavy Rain Walk in Shinjuku Tokyo", "duration": 10800 },
-  { "id": "Et7O5-CzJZg", "title": "Walking in Rain Tokyo – Binaural Thunderstorm", "duration": 1800 },
-  { "id": "p5ext1iCpiw", "title": "Hidden Alleys of Seoul on a Rainy Night", "duration": 1800 },
-  { "id": "eXtaM4QM4hk", "title": "Fireplace 4K – Crackling Fire (No Music)", "duration": 10800 },
-  { "id": "DDU-rZs-Ic4", "title": "Earth Views from the ISS", "duration": 2700 },
-  { "id": "mKCieTImjvU", "title": "Cozy Fireplace 4K – Crackling Fire", "duration": 10800 }
+  {
+    "id": "xisVS_DKpJg",
+    "title": "Slow TV: Train Ride Bergen to Oslo",
+    "duration": 26053
+  },
+  {
+    "id": "3rDjPLvOShM",
+    "title": "Train Journey to the Norwegian Arctic Circle (Winter)",
+    "duration": 35767
+  },
+  {
+    "id": "BlVJviK0ci4",
+    "title": "Seven Hours by Canal: Rickmansworth to Yeading, London Borough of Hillingdon",
+    "duration": 26512
+  },
+  {
+    "id": "tfHR-TxkA3k",
+    "title": "Flåmsbanen – The Whole Journey, Minute by Minute",
+    "duration": 3463
+  },
+  {
+    "id": "S9HdPi9Ikhk",
+    "title": "Apollo 11 Moonwalk – Restored EVA Footage (NASA, 1969)",
+    "duration": 10950
+  },
+  {
+    "id": "-nmNhKRzy4w",
+    "title": "Jeff's Earth – ISS Time-Lapse (NASA Johnson)",
+    "duration": 305
+  },
+  {
+    "id": "j9Aiiekfqiw",
+    "title": "Pages from Ceefax – BBC2, 26 August 1996",
+    "duration": 3839
+  },
+  {
+    "id": "o7dkKoPRTKo",
+    "title": "Pages from Ceefax – 1986, with the Original Music",
+    "duration": 1049
+  },
+  {
+    "id": "dGy_6qyyY7c",
+    "title": "Walking in Heavy Rain at Night – Tokyo",
+    "duration": 3290
+  },
+  {
+    "id": "p5ext1iCpiw",
+    "title": "Hidden Alleys of Seoul on a Rainy Night",
+    "duration": 3110
+  }
 ]

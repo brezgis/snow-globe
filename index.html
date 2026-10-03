@@ -30,16 +30,13 @@
   <div id="bump">
     <p id="bump-text"></p>
 
-    <!-- TV guide bump (shown occasionally instead of a text card) -->
-    <div id="bump-guide" aria-hidden="true">
-      <div class="guide-head">
-        <span class="guide-logo">snow-globe</span>
-        <span class="guide-title">PROGRAM GUIDE</span>
-        <span class="guide-clock"></span>
-      </div>
-      <div class="guide-grid"></div>
-      <div class="guide-ticker"><span></span></div>
+    <!-- "up next" card, Adult Swim style (shown on some bumps instead of a text card) -->
+    <div id="bump-next" aria-hidden="true">
+      <div class="nx-row nx-now"><span class="nx-label">next</span><span class="nx-title"></span><span class="nx-sub"></span></div>
+      <div class="nx-row nx-later"><span class="nx-label">later</span><span class="nx-title"></span><span class="nx-sub"></span></div>
+      <div class="nx-mark">[snow-globe]</div>
     </div>
+  </div>
   </div>
 
   <!-- CRT effects -->
@@ -69,7 +66,7 @@
         <button class="sheet-close" aria-label="close the guide">&times;</button>
       </div>
       <div class="sheet-cols"></div>
-      <div class="sheet-foot">all times approximate &middot; all shows imaginary &middot; you cannot change the channel &middot; that is the channel</div>
+      <div class="sheet-foot">all times local &middot; reshuffled daily &middot; you cannot change the channel &middot; that is the channel</div>
     </div>
   </div>
 

@@ -5,7 +5,7 @@
 
   // ── Config ──────────────────────────────────────
   const BUMP_DURATION = 12; // seconds per bump card
-  const GUIDE_CHANCE = 0.17; // odds a given bump is the TV guide instead of a text card
+  const NEXT_CHANCE = 0.5; // odds a given bump is an "up next" card instead of a text card
 
   const BLOCKS = [
     { name: 'morning',    start: 8,  end: 12, label: 'morning' },
@@ -26,14 +26,14 @@
   let scheduleInterval = null;
   let isShowingBump = false;
   let pendingHideBump = false;
+  let endedVideoId = null; // finished early (real length < listed duration)
   const removedVideos = new Set();
 
   // ── DOM refs ────────────────────────────────────
   const $bump = document.getElementById('bump');
   const $bumpText = document.getElementById('bump-text');
-  const $guideGrid = document.querySelector('#bump-guide .guide-grid');
-  const $guideClock = document.querySelector('#bump-guide .guide-clock');
-  const $guideTicker = document.querySelector('#bump-guide .guide-ticker span');
+  const $nextNow = document.querySelector('#bump-next .nx-now');
+  const $nextLater = document.querySelector('#bump-next .nx-later');
   const $blockLabel = document.getElementById('block-label');
   const $clock = document.getElementById('clock');
   const $muteBtn = document.getElementById('mute-btn');
@@ -64,12 +64,12 @@
       $clock.classList.add('visible');
     }, 2000);
 
-    // Preview the TV guide directly: open /#guide
-    if (location.hash === '#guide') {
+    // Preview the "up next" card directly: open /#next
+    if (location.hash === '#next') {
       setTimeout(() => {
         $static.classList.add('off');
         if ($loading) $loading.style.display = 'none';
-        window.testGuide(600);
+        window.testNext(600);
       }, 400);
     }
   }
@@ -158,13 +158,17 @@
     };
   }
 
-  function getDaySeed() {
-    const now = new Date();
+  function getDaySeed(d) {
+    const now = d || new Date();
     return now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
   }
 
-  function shuffleForToday(playlist, blockName) {
-    const seed = getDaySeed() + blockName.charCodeAt(0) * 1000;
+  // Seeded by the date the *block* started, so late night (10pm–2am) keeps one
+  // order across midnight instead of reshuffling mid-show at 12:00am.
+  function shuffleForToday(playlist, blockName, blockStart) {
+    const block = BLOCKS.find(b => b.name === blockName);
+    const start = blockStart || (block ? getBlockStartTime(block) : null);
+    const seed = getDaySeed(start) + blockName.charCodeAt(0) * 1000;
     const rng = seededRandom(seed);
     const shuffled = [...playlist].filter(v => !removedVideos.has(v.id));
     for (let i = shuffled.length - 1; i > 0; i--) {
@@ -236,9 +240,10 @@
 
     const pos = computeSchedulePosition(todaysPlaylist, elapsed);
 
-    if (pos.type === 'bump') {
+    if (pos.type === 'bump' || (pos.type === 'video' && pos.video.id === endedVideoId)) {
       showBump(block.name, pos.remainingSec);
     } else {
+      endedVideoId = null;
       // Start loading video behind the bump; hideBump is called when video plays
       if (isShowingBump) {
         pendingHideBump = true;
@@ -360,6 +365,7 @@
         if (duration > 0 && current > 0 && (duration - current) < 3) {
           // Less than 3 seconds left — force transition now
           clearInterval(endCheckInterval);
+          endedVideoId = currentVideoId;
           currentVideoId = null;
           syncToSchedule();
         }
@@ -376,6 +382,7 @@
     if (event.data === 0) {
       // Video ended naturally — resync
       clearInterval(endCheckInterval);
+      endedVideoId = currentVideoId;
       syncToSchedule();
     }
   }
@@ -427,6 +434,7 @@
   }
 
   // ── Bump Cards ──────────────────────────────────
+  const recentBumps = [];
   function getBumpMessage(blockName) {
     const now = new Date();
     const timeStr = formatTime(now);
@@ -436,7 +444,11 @@
     if (bumps[blockName]) pool.push(...bumps[blockName]);
     if (bumps.general) pool.push(...bumps.general);
 
-    const msg = pool[Math.floor(Math.random() * pool.length)];
+    const fresh = pool.filter(m => !recentBumps.includes(m));
+    const pick = fresh.length ? fresh : pool;
+    const msg = pick[Math.floor(Math.random() * pick.length)];
+    recentBumps.push(msg);
+    if (recentBumps.length > Math.min(12, Math.floor(pool.length / 2))) recentBumps.shift();
     return msg.replace('[time]', timeStr);
   }
 
@@ -507,46 +519,26 @@
     return a;
   }
 
-  // Returns true if the guide was rendered, false to fall back to a text bump.
-  function renderGuide(blockName) {
-    const g = bumps.guide;
-    if (!g || !Array.isArray(g.channels) || !Array.isArray(g.shows) || !g.shows.length) return false;
-
-    const blockLabel = (BLOCKS.find(b => b.name === blockName) || {}).label || 'now';
-    const slots = guideSlots();
-
-    const real = g.channels.filter(c => c.real).slice(0, 1);
-    const rest = shuffled(g.channels.filter(c => !c.real)).slice(0, 4);
-    const chosen = [...real, ...rest];
-    if (!chosen.length) return false;
-
-    const used = new Set();
-    let html = '<div class="guide-row guide-timerow"><span class="guide-cell guide-corner">CH</span>';
-    for (const s of slots) html += `<span class="guide-cell guide-time">${escHtml(s)}</span>`;
-    html += '</div>';
-
-    for (const ch of chosen) {
-      html += `<div class="guide-row"><span class="guide-cell guide-chan"><b>${escHtml(ch.num || '')}</b> ${escHtml(ch.name || '')}</span>`;
-      let cells;
-      if (ch.real) {
-        // Ground the real channel in the actual current block.
-        cells = [`${blockLabel} programming`, ...pickShows(g.shows, 2, used)];
-      } else {
-        cells = pickShows(g.shows, 3, used);
-      }
-      cells.forEach((c, ci) => {
-        html += `<span class="guide-cell guide-show${ci === 0 ? ' now' : ''}">${escHtml(c)}</span>`;
-      });
-      html += '</div>';
-    }
-
-    $guideGrid.innerHTML = html;
-    if ($guideClock) $guideClock.textContent = formatTime(new Date());
-    if ($guideTicker) {
-      const t = (g.ticker && g.ticker.length) ? g.ticker[Math.floor(Math.random() * g.ticker.length)] : '';
-      // Triple it so the marquee can scroll without a visible gap.
-      $guideTicker.textContent = `${t}   ${t}   ${t}`;
-    }
+  // "La Jetée – Chris Marker (1962)" → title "La Jetée", sub "Chris Marker (1962)"
+  function splitShow(title) {
+    const t = sgSplitTitle(title).name;
+    const i = t.indexOf(' – ');
+    return i > 0 ? { title: t.slice(0, i), sub: t.slice(i + 3) } : { title: t, sub: '' };
+  }
+  function fillNext($row, prog) {
+    $row.classList.toggle('empty', !prog);
+    if (!prog) return;
+    const s = splitShow(prog.title);
+    $row.querySelector('.nx-title').textContent = s.title;
+    $row.querySelector('.nx-sub').textContent = s.sub;
+  }
+  // Returns true if the card was rendered, false to fall back to a text bump.
+  function renderUpNext() {
+    // programs that haven't started yet — during a bump, the next one is next
+    const rows = upcomingPrograms(4).filter(r => r.start > Date.now());
+    if (!rows.length || !$nextNow) return false;
+    fillNext($nextNow, rows[0]);
+    fillNext($nextLater, rows[1]);
     return true;
   }
 
@@ -560,9 +552,9 @@
       player.pauseVideo();
     }
 
-    // Occasionally run the TV guide instead of a plain text card.
-    if (Math.random() < GUIDE_CHANCE && renderGuide(blockName)) {
-      $bump.classList.add('guide-mode');
+    // About half the time, an Adult Swim-style "next / later" card.
+    if (Math.random() < NEXT_CHANCE && renderUpNext()) {
+      $bump.classList.add('next-mode');
     } else {
       $bumpText.textContent = getBumpMessage(blockName);
     }
@@ -575,7 +567,7 @@
   function hideBump() {
     if (!isShowingBump) return;
     $bump.classList.remove('active');
-    $bump.classList.remove('guide-mode');
+    $bump.classList.remove('next-mode');
     stopBumpAudio();
     isShowingBump = false;
   }
@@ -637,14 +629,14 @@
     }, BUMP_DURATION * 1000);
   };
 
-  // Force the TV guide for testing: testGuide() or testGuide(20) to hold 20s.
-  window.testGuide = function(seconds) {
+  // Force the "up next" card for testing: testNext() or testNext(20) to hold 20s.
+  window.testNext = function(seconds) {
     const block = getCurrentBlock();
     if (isShowingBump) hideBump();
     isShowingBump = true;
     if (playerReady && player.getPlayerState && player.getPlayerState() === 1) player.pauseVideo();
-    if (renderGuide(block.name)) {
-      $bump.classList.add('guide-mode');
+    if (renderUpNext()) {
+      $bump.classList.add('next-mode');
     } else {
       $bumpText.textContent = getBumpMessage(block.name);
     }
@@ -655,10 +647,7 @@
   };
 
   // ── snow-guide: liftable printed program guide ──
-  const SG_FAKE_COUNT = 5;     // nonsense channels shown alongside the real one
-  const SG_SWAP_CHANCE = 0.3;  // odds a given slot flips to a different channel on reopen
-  let sgSlots = null;          // which fake channels are currently on the page
-
+  // The real schedule only: the rest of the current block, then the next two.
   function sgEsc(s) {
     return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   }
@@ -672,98 +661,82 @@
     let name = parts[0] || String(title);
     let net = parts.length > 1 ? parts[parts.length - 1] : '';
     if (net && net.length > 16) net = '';
-    if (name.length > 50) name = name.slice(0, 48).replace(/[\s\-–—:,]+$/, '') + '…';
+    if (name.length > 66) name = name.slice(0, 64).replace(/[\s\-–—:,]+$/, '') + '…';
     return { name, net };
   }
-  // CH 01 — genuinely accurate: the live schedule, now + what's coming and when
-  function sgRealChannel(count) {
-    const block = getCurrentBlock();
+  // Every program in a block, in airing order, with real start times
+  // (the playlist loops until the block ends, exactly like the player).
+  function blockPrograms(block, start) {
     const pl = playlists[block.name];
-    if (!pl || !pl.length) return null;
-    const today = shuffleForToday(pl, block.name);
-    const now = new Date();
-    const elapsed = (now - getBlockStartTime(block)) / 1000;
-    const pos = computeSchedulePosition(today, elapsed);
-    let idx, startMs, liveRow;
-    if (pos.type === 'video') {
-      idx = pos.index; startMs = now.getTime() - (pos.video.duration - pos.remainingSec) * 1000; liveRow = 0;
-    } else {
-      idx = pos.nextIndex; startMs = now.getTime() + pos.remainingSec * 1000; liveRow = -1;
+    if (!pl || !pl.length) return [];
+    const order = shuffleForToday(pl, block.name, start);
+    const end = start.getTime() + (block.end - block.start) * 3600000;
+    const out = []; let t = start.getTime(); let i = 0;
+    while (t < end && i < 2000) {
+      const v = order[i % order.length];
+      const durMs = (v.duration + BUMP_DURATION) * 1000;
+      out.push({ start: t, end: t + durMs, video: v });
+      t += durMs; i++;
     }
-    const rows = []; let t = startMs;
-    for (let k = 0; k < count; k++) {
-      const v = today[(idx + k) % today.length];
-      const s = sgSplitTitle(v.title);
-      rows.push({ time: sgTime(new Date(t)), title: s.name, net: s.net, now: k === liveRow });
-      t += (v.duration + BUMP_DURATION) * 1000;
-    }
-    return { num: '01', name: 'SNOW-GLOBE', real: true, rows };
+    return out;
   }
-  // the nonsense channels — a deterministic-per-day printed schedule
-  function sgFakeChannel(ch, count) {
-    const shows = (bumps.guide && bumps.guide.shows) || [];
-    if (!shows.length) return { num: ch.num, name: ch.name, rows: [] };
-    const rand = seededRandom(getDaySeed() + (parseInt(ch.num, 10) || 1) * 131 + 17);
-    const now = new Date();
-    const t = new Date(now); t.setMinutes(0, 0, 0); t.setHours(t.getHours() - 1);
-    const rows = []; const recent = []; let cur = t.getTime();
-    for (let k = 0; k < count; k++) {
-      let s, tries = 0;
-      do { s = shows[Math.floor(rand() * shows.length)]; tries++; } while (recent.includes(s) && tries < 8);
-      recent.push(s); if (recent.length > 3) recent.shift();
-      const dur = [30, 30, 60, 60, 90][Math.floor(rand() * 5)];
-      const start = new Date(cur), end = new Date(cur + dur * 60000);
-      rows.push({ time: sgTime(start), title: s, now: now >= start && now < end });
-      cur = end.getTime();
-    }
-    return { num: ch.num, name: ch.name, rows };
+  // The block that follows `block` (whose start was `start`), and when it starts.
+  function nextBlock(block, start) {
+    const nextStart = new Date(start.getTime() + (block.end - block.start) * 3600000);
+    const h = block.end % 24;
+    return { block: BLOCKS.find(b => b.start % 24 === h), start: nextStart };
   }
-  function sgChannelHTML(c) {
-    const lis = c.rows.map(r =>
-      `<li${r.now ? ' class="now"' : ''}><b>${sgEsc(r.time)}</b> <span>${sgEsc(r.title)}` +
-      `${r.net ? ` <em>(${sgEsc(r.net)})</em>` : ''}</span></li>`).join('');
-    return `<div class="chan${c.real ? ' chan--real' : ''}">` +
-      `<h3><span class="cn">${sgEsc(c.num)}</span> ${sgEsc(c.name)}` +
-      `${c.real ? ' <span class="live">▶ now</span>' : ''}</h3><ul class="prog">${lis}</ul></div>`;
+  function rowFor(p, now) {
+    const s = sgSplitTitle(p.video.title);
+    return { time: sgTime(new Date(p.start)), title: s.name, net: s.net, now: now >= p.start && now < p.end };
   }
-  // pick the 5 nonsense channels: stable across opens, but each slot has a small
-  // chance of flipping to a different channel each time you lift the sheet again
-  function sgPickSlots() {
-    const pool = bumps.guide.channels.filter(c => !c.real);
-    if (!sgSlots) {
-      const s = [...pool];
-      for (let i = s.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [s[i], s[j]] = [s[j], s[i]]; }
-      sgSlots = s.slice(0, SG_FAKE_COUNT);
-      return;
-    }
-    const shown = new Set(sgSlots.map(c => c.num));
-    sgSlots = sgSlots.map(c => {
-      if (Math.random() < SG_SWAP_CHANCE) {
-        const candidates = pool.filter(p => !shown.has(p.num));
-        if (candidates.length) {
-          const pick = candidates[Math.floor(Math.random() * candidates.length)];
-          shown.delete(c.num); shown.add(pick.num);
-          return pick;
-        }
+  // Next n programs from now, across block boundaries (used by the guide bump).
+  function upcomingPrograms(n) {
+    const now = Date.now();
+    let block = getCurrentBlock(), start = getBlockStartTime(block);
+    const rows = [];
+    for (let k = 0; k < 3 && rows.length < n; k++) {
+      for (const p of blockPrograms(block, start)) {
+        if (p.end <= now) continue;
+        rows.push({ start: p.start, time: formatTime(new Date(p.start)), title: p.video.title });
+        if (rows.length >= n) break;
       }
-      return c;
-    });
+      ({ block, start } = nextBlock(block, start));
+    }
+    return rows;
+  }
+  function sgBlockHTML(block, start, now, current) {
+    const all = blockPrograms(block, start);
+    let progs = current ? all.filter(p => p.end > now) : all;
+    const cap = current ? 9 : 7;
+    const more = Math.max(0, progs.length - cap);
+    progs = progs.slice(0, cap);
+    const lis = progs.map(p => {
+      const r = rowFor(p, now);
+      return `<li${r.now ? ' class="now"' : ''}><b>${sgEsc(r.time)}</b> <span>${sgEsc(r.title)}` +
+        `${r.net ? ` <em>(${sgEsc(r.net)})</em>` : ''}</span></li>`;
+    }).join('') + (more ? `<li class="more"><b></b> <span>…and ${more} more</span></li>` : '');
+    const endD = new Date(start.getTime() + (block.end - block.start) * 3600000);
+    return `<div class="chan${current ? ' chan--real' : ''}">` +
+      `<h3><span class="cn">${sgEsc(sgTime(start))}</span> ${sgEsc(block.label.toUpperCase())}` +
+      ` <span class="span">– ${sgEsc(sgTime(endD))}</span>` +
+      `${current ? ' <span class="live">▶ now</span>' : ''}</h3><ul class="prog">${lis}</ul></div>`;
   }
   function sgBuild() {
     const cols = document.querySelector('#guidesheet .sheet-cols');
-    if (!cols || !bumps.guide) return;
+    if (!cols) return;
     const now = new Date();
     const sub = document.querySelector('#guidesheet .mast-sub');
     if (sub) {
       sub.textContent = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
         .toLowerCase() + ' · ' + formatTime(now);
     }
-    sgPickSlots();
-    const fakes = [...sgSlots].sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0));
+    let block = getCurrentBlock(), start = getBlockStartTime(block);
     let html = '';
-    const real = sgRealChannel(6);
-    if (real) html += sgChannelHTML(real);
-    for (const ch of fakes) html += sgChannelHTML(sgFakeChannel(ch, 6));
+    for (let k = 0; k < 3 && block; k++) {
+      html += sgBlockHTML(block, start, now.getTime(), k === 0);
+      ({ block, start } = nextBlock(block, start));
+    }
     cols.innerHTML = html;
   }
   function sgOpen()  { const g = document.getElementById('guidesheet'); if (!g) return; sgBuild(); g.classList.add('open'); g.setAttribute('aria-hidden', 'false'); }

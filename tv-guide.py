@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timedelta
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BUMP_DURATION = 20  # seconds
+BUMP_DURATION = 12  # seconds — must match app.js
 
 BLOCKS = [
     {"name": "morning",   "start": 8,  "end": 12, "label": "☀️ morning"},
@@ -27,8 +27,10 @@ def seeded_random(seed):
         return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296
     return rng
 
-def shuffle_for_today(playlist, block_name):
-    now = datetime.now()
+def shuffle_for_today(playlist, block_name, day=None):
+    # Seeded by the date the block starts (matches app.js), so late night keeps
+    # one order across midnight.
+    now = day or datetime.now()
     day_seed = now.year * 10000 + now.month * 100 + now.day
     seed = day_seed + ord(block_name[0]) * 1000
     rng = seeded_random(seed)
@@ -81,19 +83,22 @@ def generate_guide():
         if block_name == "deadhours":
             current_time = current_time  # already correct
         
-        for i, video in enumerate(shuffled):
+        # Compute block end as a datetime for reliable comparison
+        block_end = now.replace(hour=end_hour % 24, minute=0, second=0, microsecond=0)
+        if block["end"] >= 24:
+            block_end += timedelta(days=1)
+        if block_end <= current_time:
+            block_end += timedelta(days=1)
+        
+        # The site loops the playlist until the block ends, so the guide does too.
+        i = 0
+        while shuffled and current_time < block_end:
+            video = shuffled[i % len(shuffled)]
             time_str = format_time(current_time)
             dur_str = format_duration(video["duration"])
             lines.append(f"  {time_str:>10}  {video['title']}  ({dur_str})")
             current_time += timedelta(seconds=video["duration"] + BUMP_DURATION)
-            
-            # Stop if we've gone past the block end
-            end_check = end_hour if end_hour > start_hour else end_hour + 24
-            current_check = current_time.hour if current_time.hour >= start_hour else current_time.hour + 24
-            if block_name != "deadhours" and current_check >= end_check:
-                if i < len(shuffled) - 1:
-                    lines.append(f"             ...")
-                break
+            i += 1
         
         lines.append("```")
         lines.append("")
