@@ -72,7 +72,9 @@ No backend. No database. No streaming server. Pure static site — HTML, CSS, JS
 
 ## Bumps
 
-12-second interstitials between videos, Adult Swim style: black screen, white text. About half are text cards (time-aware, with different pools for each block); the rest are "next / later" cards showing what's actually coming up.
+12-second interstitials between videos, in the spirit of Adult Swim bumps. There are 22 of them in `bumps.js`, all drawn live in the browser with their sound synthesized on the spot, and most re-roll their script each time. Among them: a snow globe that gets shaken, an inkblot that is always a moth, sheep being counted from somewhere in the thousands, a fish that eats the sentence, viewer mail, the Emergency Feelings System, the forecast for your apartment, light travelling to the moon in real time, rule 30, and plain text cards drawn from `bumps.json` (time-aware, with a pool per block).
+
+Preview one with `/#bump=sheep`, or run `testBump('sheep', 30)` in the console (`listBumps()` lists them).
 
 The **snow-guide** button (bottom left) lifts a printed program guide over the video: the real schedule for the rest of this block and the next two.
 
@@ -91,7 +93,8 @@ snow-globe/
 ├── index.html              # The page
 ├── style.css               # CRT aesthetic, scanlines, vignette
 ├── app.js                  # Schedule logic, YouTube player, bumps
-├── bumps.json              # Bump text pools (general + per-block)
+├── bumps.js                # The bump library: 22 animated, self-scoring bumps
+├── bumps.json              # Text-card pools (general + per-block)
 ├── playlists/
 │   ├── morning.json        # ☀️ Nature, cooking, crafts
 │   ├── afternoon.json      # 🌤️ Docs, essays, educational

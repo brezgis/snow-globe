@@ -5,7 +5,6 @@
 
   // ── Config ──────────────────────────────────────
   const BUMP_DURATION = 12; // seconds per bump card
-  const NEXT_CHANCE = 0.5; // odds a given bump is an "up next" card instead of a text card
 
   const BLOCKS = [
     { name: 'morning',    start: 8,  end: 12, label: 'morning' },
@@ -31,9 +30,7 @@
 
   // ── DOM refs ────────────────────────────────────
   const $bump = document.getElementById('bump');
-  const $bumpText = document.getElementById('bump-text');
-  const $nextNow = document.querySelector('#bump-next .nx-now');
-  const $nextLater = document.querySelector('#bump-next .nx-later');
+  const $bumpStage = document.getElementById('bump-stage');
   const $blockLabel = document.getElementById('block-label');
   const $clock = document.getElementById('clock');
   const $muteBtn = document.getElementById('mute-btn');
@@ -64,12 +61,13 @@
       $clock.classList.add('visible');
     }, 2000);
 
-    // Preview the "up next" card directly: open /#next
-    if (location.hash === '#next') {
+    // Preview a specific bump directly: /#bump or /#bump=sheep
+    const m = location.hash.match(/^#bump(?:=([a-z0-9]+))?$/);
+    if (m) {
       setTimeout(() => {
         $static.classList.add('off');
         if ($loading) $loading.style.display = 'none';
-        window.testNext(600);
+        window.testBump(m[1], 600);
       }, 400);
     }
   }
@@ -224,7 +222,10 @@
     return { type: 'video', video: playlist[0], index: 0, seekTo: 0, remainingSec: playlist[0].duration };
   }
 
+  let bumpHoldUntil = 0; // testBump() previews hold the screen this long
+
   function syncToSchedule() {
+    if (Date.now() < bumpHoldUntil) { clearTimeout(bumpTimeout); bumpTimeout = setTimeout(syncToSchedule, 1000); return; }
     const block = getCurrentBlock();
     const playlist = playlists[block.name];
     if (!playlist || !playlist.length) return;
@@ -335,6 +336,7 @@
     
     // Click anywhere to unmute (first interaction)
     function unmuteOnClick() {
+      unlockAudio();
       player.unMute();
       isMuted = false;
       $muteBtn.textContent = '🔊';
@@ -434,6 +436,7 @@
   }
 
   // ── Bump Cards ──────────────────────────────────
+  // Text-card copy (bumps.json), used by the 'card' bump in bumps.js.
   const recentBumps = [];
   function getBumpMessage(blockName) {
     const now = new Date();
@@ -443,6 +446,7 @@
     const pool = [];
     if (bumps[blockName]) pool.push(...bumps[blockName]);
     if (bumps.general) pool.push(...bumps.general);
+    if (!pool.length) return '[snow-globe]';
 
     const fresh = pool.filter(m => !recentBumps.includes(m));
     const pick = fresh.length ? fresh : pool;
@@ -452,94 +456,117 @@
     return msg.replace('[time]', timeStr);
   }
 
-  // ── Bump Audio ───────────────────────────────────
-  const BUMP_AUDIO_COUNT = 23;
-  let bumpAudio = null;
-
-  function playBumpAudio() {
-    const idx = Math.floor(Math.random() * BUMP_AUDIO_COUNT) + 1;
-    const padded = idx.toString().padStart(2, '0');
-    bumpAudio = new Audio(`audio/bump_${padded}.mp3`);
-    bumpAudio.volume = 0.5;
-    bumpAudio.onerror = () => { bumpAudio = null; }; // suppress browser error UI
-    // Delay audio slightly to sync with CSS opacity fade-in (1.2s transition)
-    setTimeout(() => {
-      if (bumpAudio) bumpAudio.play().catch(() => { bumpAudio = null; });
-    }, 300);
+  // ── Bump audio: everything is synthesized per bump (Web Audio) ──
+  let audioCtx = null;
+  function unlockAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { audioCtx = null; }
   }
 
-  function stopBumpAudio() {
-    if (bumpAudio) {
-      bumpAudio.pause();
-      bumpAudio.currentTime = 0;
-      bumpAudio = null;
+  // ── Bump runtime ─────────────────────────────────
+  // Each bump in bumps.js gets an `api` whose timers, frames, listeners and
+  // sounds are all tracked here, so a bump can be cut off at any moment.
+  let activeBump = null;
+  const recentBumpIds = [];
+
+  function makeBumpApi(blockName) {
+    const timers = [], intervals = [], listeners = [], nodes = [];
+    let raf = 0, alive = true, master = null;
+    const sound = (!isMuted && audioCtx && audioCtx.state === 'running') ? audioCtx : null;
+    if (sound) {
+      master = sound.createGain();
+      master.gain.value = 0.9;
+      master.connect(sound.destination);
+    }
+    const api = {
+      block: blockName,
+      time: formatTime(new Date()),
+      message: () => getBumpMessage(blockName),
+      el(tag, cls, text, parent) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text != null) e.textContent = text;
+        (parent || $bumpStage).appendChild(e);
+        return e;
+      },
+      after(ms, fn) { timers.push(setTimeout(() => alive && fn(), ms)); },
+      every(ms, fn) { intervals.push(setInterval(() => alive && fn(), ms)); },
+      listen(target, ev, fn) { target.addEventListener(ev, fn); listeners.push([target, ev, fn]); },
+      frame(fn) {
+        let start = 0, last = 0;
+        const loop = (now) => {
+          if (!alive) return;
+          if (!start) start = last = now;
+          fn(now - start, Math.min(50, now - last));
+          last = now;
+          raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+      },
+      canvas() {
+        const c = document.createElement('canvas');
+        c.className = 'bs-canvas';
+        $bumpStage.appendChild(c);
+        const W = window.innerWidth, H = window.innerHeight;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
+        const ctx = c.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { c, ctx, W, H };
+      },
+      // Web Audio context + this bump's output bus (null when muted)
+      audio: sound ? { ctx: sound, out: master, track: n => (nodes.push(n), n) } : null,
+      dispose() {
+        alive = false;
+        timers.forEach(clearTimeout); intervals.forEach(clearInterval);
+        cancelAnimationFrame(raf);
+        listeners.forEach(([t, ev, fn]) => t.removeEventListener(ev, fn));
+        if (master) {
+          const t = sound.currentTime;
+          master.gain.cancelScheduledValues(t);
+          master.gain.setValueAtTime(master.gain.value, t);
+          master.gain.linearRampToValueAtTime(0, t + 0.4);
+          setTimeout(() => { nodes.forEach(n => { try { n.stop(); } catch (e) {} }); master.disconnect(); }, 500);
+        }
+      },
+    };
+    return api;
+  }
+
+  function chooseBump(id) {
+    const all = window.SG_BUMPS || [];
+    if (id) { const b = all.find(x => x.id === id); if (b) return b; }
+    const pool = all.filter(b => !recentBumpIds.includes(b.id) && (!b.blocks || b.blocks.includes(getCurrentBlock().name)));
+    const list = pool.length ? pool : all;
+    let r = Math.random() * list.reduce((n, b) => n + b.weight, 0);
+    for (const b of list) { r -= b.weight; if (r <= 0) return b; }
+    return list[0];
+  }
+
+  function startBump(blockName, id) {
+    stopBumpContent();
+    const b = chooseBump(id);
+    $bumpStage.innerHTML = '';
+    if (!b) return;
+    recentBumpIds.push(b.id);
+    if (recentBumpIds.length > 7) recentBumpIds.shift();
+    const api = makeBumpApi(blockName);
+    activeBump = { b, api };
+    $bump.dataset.bump = b.id;
+    try { b.run($bumpStage, api); } catch (e) {
+      console.warn('bump failed:', b.id, e);
+      $bumpStage.innerHTML = '';
+      api.el('p', 'bs-card in', '[snow-globe]');
     }
   }
 
-  // ── TV Guide bump ────────────────────────────────
-  function escHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => (
-      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-    ));
-  }
-
-  // Three half-hour slot labels starting from the current half hour.
-  function guideSlots() {
-    const base = new Date();
-    base.setSeconds(0, 0);
-    base.setMinutes(base.getMinutes() < 30 ? 0 : 30);
-    const slots = [];
-    for (let i = 0; i < 3; i++) {
-      const d = new Date(base.getTime() + i * 30 * 60000);
-      const h = d.getHours() % 12 || 12;
-      const m = d.getMinutes().toString().padStart(2, '0');
-      slots.push(`${h}:${m}`);
-    }
-    return slots;
-  }
-
-  function pickShows(pool, n, used) {
-    const out = [];
-    let guard = 0;
-    while (out.length < n && guard < 200) {
-      const s = pool[Math.floor(Math.random() * pool.length)];
-      if (!used.has(s)) { used.add(s); out.push(s); }
-      guard++;
-    }
-    while (out.length < n) out.push('—');
-    return out;
-  }
-
-  function shuffled(arr) {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  }
-
-  // "La Jetée – Chris Marker (1962)" → title "La Jetée", sub "Chris Marker (1962)"
-  function splitShow(title) {
-    const t = sgSplitTitle(title).name;
-    const i = t.indexOf(' – ');
-    return i > 0 ? { title: t.slice(0, i), sub: t.slice(i + 3) } : { title: t, sub: '' };
-  }
-  function fillNext($row, prog) {
-    $row.classList.toggle('empty', !prog);
-    if (!prog) return;
-    const s = splitShow(prog.title);
-    $row.querySelector('.nx-title').textContent = s.title;
-    $row.querySelector('.nx-sub').textContent = s.sub;
-  }
-  // Returns true if the card was rendered, false to fall back to a text bump.
-  function renderUpNext() {
-    // programs that haven't started yet — during a bump, the next one is next
-    const rows = upcomingPrograms(4).filter(r => r.start > Date.now());
-    if (!rows.length || !$nextNow) return false;
-    fillNext($nextNow, rows[0]);
-    fillNext($nextLater, rows[1]);
-    return true;
+  function stopBumpContent() {
+    if (activeBump) { activeBump.api.dispose(); activeBump = null; }
+    // let the fade-out finish before clearing the stage
+    const stage = $bumpStage;
+    setTimeout(() => { if (!activeBump) stage.innerHTML = ''; }, 1300);
   }
 
   // ── Bump show/hide ───────────────────────────────
@@ -552,23 +579,15 @@
       player.pauseVideo();
     }
 
-    // About half the time, an Adult Swim-style "next / later" card.
-    if (Math.random() < NEXT_CHANCE && renderUpNext()) {
-      $bump.classList.add('next-mode');
-    } else {
-      $bumpText.textContent = getBumpMessage(blockName);
-    }
-
+    startBump(blockName);
     $bump.classList.add('active');
-    playBumpAudio();
     currentVideoId = null; // force reload after bump
   }
 
   function hideBump() {
     if (!isShowingBump) return;
     $bump.classList.remove('active');
-    $bump.classList.remove('next-mode');
-    stopBumpAudio();
+    stopBumpContent();
     isShowingBump = false;
   }
 
@@ -611,6 +630,7 @@
   // ── Mute ────────────────────────────────────────
   function toggleMute() {
     isMuted = !isMuted;
+    if (!isMuted) unlockAudio();
     if (playerReady) {
       if (isMuted) player.mute();
       else player.unMute();
@@ -619,32 +639,22 @@
     $muteBtn.textContent = isMuted ? '🔇' : '🔊';
   }
 
-  // ── Debug: test bump from console ────────────────
-  window.testBump = function() {
-    const block = getCurrentBlock();
-    showBump(block.name, BUMP_DURATION);
-    setTimeout(() => {
-      hideBump();
-      syncToSchedule();
-    }, BUMP_DURATION * 1000);
-  };
-
-  // Force the "up next" card for testing: testNext() or testNext(20) to hold 20s.
-  window.testNext = function(seconds) {
+  // ── Debug: test bumps from console ───────────────
+  // testBump() → a random bump; testBump('sheep') → that one; testBump('sheep', 30) holds 30s.
+  window.testBump = function(id, seconds) {
     const block = getCurrentBlock();
     if (isShowingBump) hideBump();
     isShowingBump = true;
     if (playerReady && player.getPlayerState && player.getPlayerState() === 1) player.pauseVideo();
-    if (renderUpNext()) {
-      $bump.classList.add('next-mode');
-    } else {
-      $bumpText.textContent = getBumpMessage(block.name);
-    }
+    startBump(block.name, id);
     $bump.classList.add('active');
-    playBumpAudio();
     currentVideoId = null;
-    setTimeout(() => { hideBump(); syncToSchedule(); }, (seconds || BUMP_DURATION) * 1000);
+    clearTimeout(window._testBumpT);
+    bumpHoldUntil = Date.now() + (seconds || BUMP_DURATION) * 1000;
+    window._testBumpT = setTimeout(() => { bumpHoldUntil = 0; hideBump(); syncToSchedule(); }, (seconds || BUMP_DURATION) * 1000);
   };
+  window.listBumps = () => (window.SG_BUMPS || []).map(b => b.id);
+  window.bumpAudioState = () => (audioCtx ? audioCtx.state : 'locked') + (isMuted ? ' (muted)' : '');
 
   // ── snow-guide: liftable printed program guide ──
   // The real schedule only: the rest of the current block, then the next two.
@@ -689,21 +699,6 @@
   function rowFor(p, now) {
     const s = sgSplitTitle(p.video.title);
     return { time: sgTime(new Date(p.start)), title: s.name, net: s.net, now: now >= p.start && now < p.end };
-  }
-  // Next n programs from now, across block boundaries (used by the guide bump).
-  function upcomingPrograms(n) {
-    const now = Date.now();
-    let block = getCurrentBlock(), start = getBlockStartTime(block);
-    const rows = [];
-    for (let k = 0; k < 3 && rows.length < n; k++) {
-      for (const p of blockPrograms(block, start)) {
-        if (p.end <= now) continue;
-        rows.push({ start: p.start, time: formatTime(new Date(p.start)), title: p.video.title });
-        if (rows.length >= n) break;
-      }
-      ({ block, start } = nextBlock(block, start));
-    }
-    return rows;
   }
   function sgBlockHTML(block, start, now, current) {
     const all = blockPrograms(block, start);
