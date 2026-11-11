@@ -4,7 +4,9 @@
   'use strict';
 
   // ── Config ──────────────────────────────────────
-  const BUMP_DURATION = 12; // seconds per bump card
+  // Seconds per bump. Every file in bumps/ is exactly this long (bumps/src/build.py
+  // checks it), and tv-guide.py assumes the same number. Change all three together.
+  const BUMP_DURATION = 12;
 
   const BLOCKS = [
     { name: 'morning',    start: 8,  end: 12, label: 'morning' },
@@ -189,6 +191,9 @@
 
     // Where are we in the cycle?
     const posInCycle = ((elapsedSec % totalCycleDuration) + totalCycleDuration) % totalCycleDuration;
+    // Bump slots are numbered from the start of the block: slot n follows the
+    // (n+1)th program aired. Everyone computes the same number.
+    const slotBase = Math.floor(elapsedSec / totalCycleDuration) * playlist.length;
 
     let cursor = 0;
     for (let i = 0; i < playlist.length; i++) {
@@ -200,6 +205,7 @@
           type: 'video',
           video: video,
           index: i,
+          slot: slotBase + i,          // the bump that follows this program
           seekTo: posInCycle - cursor,
           remainingSec: video.duration - (posInCycle - cursor),
         };
@@ -212,6 +218,7 @@
           type: 'bump',
           nextVideo: playlist[(i + 1) % playlist.length],
           nextIndex: (i + 1) % playlist.length,
+          slot: slotBase + i,
           remainingSec: BUMP_DURATION - (posInCycle - cursor),
         };
       }
@@ -219,7 +226,7 @@
     }
 
     // Shouldn't get here, but fallback
-    return { type: 'video', video: playlist[0], index: 0, seekTo: 0, remainingSec: playlist[0].duration };
+    return { type: 'video', video: playlist[0], index: 0, slot: slotBase, seekTo: 0, remainingSec: playlist[0].duration };
   }
 
   let bumpHoldUntil = 0; // testBump() previews hold the screen this long
@@ -241,10 +248,16 @@
 
     const pos = computeSchedulePosition(todaysPlaylist, elapsed);
 
-    if (pos.type === 'bump' || (pos.type === 'video' && pos.video.id === endedVideoId)) {
-      showBump(block.name, pos.remainingSec);
+    if (pos.type === 'bump') {
+      showBump(block.name, blockStart, pos.slot, BUMP_DURATION - pos.remainingSec);
+    } else if (pos.video.id === endedVideoId) {
+      // the program ran out a little before its slot: bring the bump up now,
+      // but hold its first frame until the slot really begins
+      showBump(block.name, blockStart, pos.slot, -pos.remainingSec);
     } else {
       endedVideoId = null;
+      // fetch the bump that follows this program while the program plays
+      if (!isShowingBump && window.SG_video) window.SG_video.preload(bumpForSlot(block.name, blockStart, pos.slot));
       // Start loading video behind the bump; hideBump is called when video plays
       if (isShowingBump) {
         pendingHideBump = true;
@@ -339,6 +352,7 @@
       unlockAudio();
       player.unMute();
       isMuted = false;
+      if (activeBump && activeBump.api.setMuted) activeBump.api.setMuted(false);
       $muteBtn.textContent = '🔊';
       const hint = document.getElementById('unmute-hint');
       if (hint) hint.style.opacity = '0';
@@ -463,35 +477,72 @@
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') audioCtx.resume();
     } catch (e) { audioCtx = null; }
+    // we are inside a user gesture: let the bump <video> play with sound from now on
+    if (window.SG_video) window.SG_video.unlock();
   }
 
   // ── Bump runtime (shared with bumps.html; lives in bumps.js) ──
   let activeBump = null;
-  const recentBumpIds = [];
 
-  function chooseBump(id) {
-    const all = window.SG_BUMPS || [];
-    if (id) { const b = all.find(x => x.id === id); if (b) return b; }
-    const pool = all.filter(b => !recentBumpIds.includes(b.id) && (!b.blocks || b.blocks.includes(getCurrentBlock().name)));
-    const list = pool.length ? pool : all;
-    let r = Math.random() * list.reduce((n, b) => n + b.weight, 0);
-    for (const b of list) { r -= b.weight; if (r <= 0) return b; }
-    return list[0];
+  // Which bump airs in which slot. Like the playlist, the order is a shuffle
+  // seeded by the date the block started, so everyone watching sees the same
+  // bump at the same moment. tv-guide.py mirrors this (bump_order).
+  function bumpOrder(blockName, blockStart) {
+    const all = (window.SG_VIDEO_BUMPS || []).filter(b => !b.blocks || b.blocks.includes(blockName));
+    const rng = seededRandom(getDaySeed(blockStart) + blockName.charCodeAt(0) * 1000 + 7919);
+    const order = [...all];
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    return order;
+  }
+  function bumpForSlot(blockName, blockStart, slot) {
+    const order = bumpOrder(blockName, blockStart);
+    return order.length ? order[((slot % order.length) + order.length) % order.length] : null;
   }
 
-  function startBump(blockName, id) {
-    stopBumpContent();
-    const b = chooseBump(id);
+  function liveBump(id) {
+    const all = window.SG_BUMPS || [];
+    return all.find(x => x.id === id) || null;
+  }
+
+  // The fallback, and the path for testBump('sheep'): one of the live-drawn bumps.
+  function startLiveBump(blockName, b) {
     $bumpStage.innerHTML = '';
-    if (!b) return;
-    recentBumpIds.push(b.id);
-    if (recentBumpIds.length > 7) recentBumpIds.shift();
+    if (!b || !window.SG_playBump) return null;
     $bump.dataset.bump = b.id;
-    const api = window.SG_playBump(b, $bumpStage, {
+    return window.SG_playBump(b, $bumpStage, {
       audioCtx, muted: isMuted, block: blockName,
       time: formatTime(new Date()), message: () => getBumpMessage(blockName),
     });
-    activeBump = { b, api };
+  }
+
+  // offset: seconds into the slot right now (negative if the slot has not begun)
+  function startBump(blockName, vb, offset, liveId) {
+    stopBumpContent();
+    $bumpStage.innerHTML = '';
+    if (liveId && liveBump(liveId)) {
+      activeBump = { api: startLiveBump(blockName, liveBump(liveId)) };
+      return;
+    }
+    if (vb && window.SG_video) {
+      $bump.dataset.bump = vb.id;
+      const holder = { api: null };
+      holder.api = window.SG_video.play(vb, $bumpStage, {
+        offset, muted: isMuted,
+        onFail: () => {
+          // the file did not arrive: a plain text card, drawn live, holds the slot
+          if (activeBump !== holder) return;
+          const api = startLiveBump(blockName, liveBump('card'));
+          if (api) holder.api = api;
+        },
+      });
+      activeBump = holder;
+      return;
+    }
+    const api = startLiveBump(blockName, liveBump('card'));
+    activeBump = api ? { api } : null;
   }
 
   function stopBumpContent() {
@@ -502,7 +553,7 @@
   }
 
   // ── Bump show/hide ───────────────────────────────
-  function showBump(blockName, remainingSec) {
+  function showBump(blockName, blockStart, slot, offset) {
     if (isShowingBump) return;
     isShowingBump = true;
 
@@ -511,7 +562,7 @@
       player.pauseVideo();
     }
 
-    startBump(blockName);
+    startBump(blockName, bumpForSlot(blockName, blockStart, slot), offset);
     $bump.classList.add('active');
     currentVideoId = null; // force reload after bump
   }
@@ -563,6 +614,7 @@
   function toggleMute() {
     isMuted = !isMuted;
     if (!isMuted) unlockAudio();
+    if (activeBump && activeBump.api.setMuted) activeBump.api.setMuted(isMuted);
     if (playerReady) {
       if (isMuted) player.mute();
       else player.unMute();
@@ -572,21 +624,28 @@
   }
 
   // ── Debug: test bumps from console ───────────────
-  // testBump() → a random bump; testBump('sheep') → that one; testBump('sheep', 30) holds 30s.
+  // testBump() → a random video bump; testBump('station') → that one;
+  // testBump('sheep', 30) → one of the live-drawn originals, held for 30 s.
   window.testBump = function(id, seconds) {
     const block = getCurrentBlock();
+    const vids = window.SG_VIDEO_BUMPS || [];
+    const vb = id ? vids.find(b => b.id === id) : vids[Math.floor(Math.random() * vids.length)];
     if (isShowingBump) hideBump();
     isShowingBump = true;
     if (playerReady && player.getPlayerState && player.getPlayerState() === 1) player.pauseVideo();
-    startBump(block.name, id);
+    startBump(block.name, vb || null, 0, vb ? null : (id || 'card'));
     $bump.classList.add('active');
     currentVideoId = null;
     clearTimeout(window._testBumpT);
-    bumpHoldUntil = Date.now() + (seconds || BUMP_DURATION) * 1000;
-    window._testBumpT = setTimeout(() => { bumpHoldUntil = 0; hideBump(); syncToSchedule(); }, (seconds || BUMP_DURATION) * 1000);
+    const hold = vb ? BUMP_DURATION : (seconds || BUMP_DURATION);
+    bumpHoldUntil = Date.now() + hold * 1000;
+    window._testBumpT = setTimeout(() => { bumpHoldUntil = 0; hideBump(); syncToSchedule(); }, hold * 1000);
   };
-  window.listBumps = () => (window.SG_BUMPS || []).map(b => b.id);
+  window.listBumps = () => (window.SG_VIDEO_BUMPS || []).map(b => b.id).concat((window.SG_BUMPS || []).map(b => b.id + ' (live)'));
   window.bumpAudioState = () => (audioCtx ? audioCtx.state : 'locked') + (isMuted ? ' (muted)' : '');
+  // the bump for a given slot of the current block (what tv-guide.py --bumps prints)
+  window.bumpSchedule = (n) => { const b = getCurrentBlock(), st = getBlockStartTime(b);
+    return Array.from({ length: n || 12 }, (_, i) => (bumpForSlot(b.name, st, i) || {}).id); };
 
   // ── snow-guide: liftable printed program guide ──
   // The real schedule only: the rest of the current block, then the next two.

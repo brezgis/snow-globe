@@ -72,9 +72,13 @@ No backend. No database. No streaming server. Pure static site — HTML, CSS, JS
 
 ## Bumps
 
-12-second interstitials between videos, in the spirit of Adult Swim bumps. There are 22 of them in `bumps.js`, all drawn live in the browser with their sound synthesized on the spot, and most re-roll their script each time. Among them: a snow globe that gets shaken, an inkblot that is always a moth, sheep being counted from somewhere in the thousands, a fish that eats the sentence, viewer mail, the Emergency Feelings System, the forecast for your apartment, light travelling to the moon in real time, rule 30, and plain text cards drawn from `bumps.json` (time-aware, with a pool per block).
+12-second interstitials between videos, in the spirit of Adult Swim bumps. The ones that air are short produced films in `bumps/`: public-domain footage with captions (Fred Ott's 1894 sneeze, Market Street in 1906, a jellyfish 3,700 meters down, a lava lake, a 1961 remote control), small 3D set pieces made in Blender (the whole station inside a snow globe, a television left in a snowy field, a toy train), and plain type on black. Every one is exactly 12.000 seconds, because the schedule is computed from that number. Which bump airs in which slot is a shuffle seeded by the block's start date, the same way the playlist is, so everyone sees the same bump at the same moment.
 
-Watch them all in the **bump reel** at [`/bumps.html`](https://tv.brezgis.com/bumps.html) (play all, shuffle, re-roll, fullscreen). From the channel, it's hidden: open the snow-guide and click its logo three times. On the channel itself, preview one with `/#bump=sheep`, or run `testBump('sheep', 30)` in the console (`listBumps()` lists them).
+Sources, licenses and build steps are in [`bumps/CREDITS.md`](bumps/CREDITS.md). The music and sound are synthesized by `bumps/src/music.py`.
+
+The original bumps, drawn live in the browser with synthesized sound, are still in `bumps.js`. One of them (the text card, with copy from `bumps.json`) stands in whenever a film cannot be loaded.
+
+Watch them all in the **bump reel** at [`/bumps.html`](https://tv.brezgis.com/bumps.html) (play all, shuffle, fullscreen). From the channel, it's hidden: open the snow-guide and click its logo three times. On the channel itself, preview one with `/#bump=station`, or run `testBump('station')` in the console (`listBumps()` lists them, `bumpSchedule()` shows the order for the current block).
 
 The **snow-guide** button (bottom left) lifts a printed program guide over the video: the real schedule for the rest of this block and the next two.
 
@@ -93,7 +97,9 @@ snow-globe/
 ├── index.html              # The page
 ├── style.css               # CRT aesthetic, scanlines, vignette
 ├── app.js                  # Schedule logic, YouTube player, bumps
-├── bumps.js                # The bump library: 22 animated, self-scoring bumps
+├── bumps.js                # Bump runtime: the video player + the live-drawn originals
+├── bumps/                  # The bumps that air: *.mp4, posters, manifest.js, CREDITS.md
+│   └── src/                # build.py, music.py, Blender scenes, source fetcher
 ├── bumps.json              # Text-card pools (general + per-block)
 ├── playlists/
 │   ├── morning.json        # ☀️ Nature, cooking, crafts
@@ -143,6 +149,7 @@ git push origin main
 
 ```bash
 python3 tv-guide.py
+python3 tv-guide.py --bumps   # also name the bump after each program
 ```
 
 ## Built with

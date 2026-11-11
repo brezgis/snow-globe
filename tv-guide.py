@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""snow-globe daily TV guide generator. Outputs a formatted schedule for today."""
+"""snow-globe daily TV guide generator. Outputs a formatted schedule for today.
+
+  python3 tv-guide.py            # the programs
+  python3 tv-guide.py --bumps    # also name the bump that airs after each program
+"""
 
 import json
 import os
+import re
+import sys
 from datetime import datetime, timedelta
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BUMP_DURATION = 12  # seconds — must match app.js
+# Seconds per bump. Must match BUMP_DURATION in app.js and the real length of
+# every file in bumps/ (bumps/src/build.py --check verifies the files).
+BUMP_DURATION = 12
 
 BLOCKS = [
     {"name": "morning",   "start": 8,  "end": 12, "label": "☀️ morning"},
@@ -40,6 +48,27 @@ def shuffle_for_today(playlist, block_name, day=None):
         shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
     return shuffled
 
+def load_bumps():
+    """The video bumps, from bumps/manifest.js (written by bumps/src/build.py)."""
+    path = os.path.join(SCRIPT_DIR, "bumps", "manifest.js")
+    if not os.path.exists(path):
+        return []
+    text = open(path, encoding="utf-8").read()
+    m = re.search(r"window\.SG_VIDEO_BUMPS\s*=\s*(\[.*\]);", text, re.S)
+    return json.loads(m.group(1)) if m else []
+
+def bump_order(bumps, block_name, day=None):
+    """Mirror of bumpOrder() in app.js: the bumps allowed in this block, shuffled
+    with the block's day seed + 7919. Slot n airs order[n % len(order)]."""
+    now = day or datetime.now()
+    day_seed = now.year * 10000 + now.month * 100 + now.day
+    rng = seeded_random(day_seed + ord(block_name[0]) * 1000 + 7919)
+    order = [b for b in bumps if not b.get("blocks") or block_name in b["blocks"]]
+    for i in range(len(order) - 1, 0, -1):
+        j = int(rng() * (i + 1))
+        order[i], order[j] = order[j], order[i]
+    return order
+
 def format_duration(secs):
     m, s = divmod(int(secs), 60)
     h, m = divmod(m, 60)
@@ -50,8 +79,9 @@ def format_duration(secs):
 def format_time(dt):
     return dt.strftime("%-I:%M %p").lower()
 
-def generate_guide():
+def generate_guide(show_bumps=False):
     now = datetime.now()
+    bumps = load_bumps() if show_bumps else []
     today = now.strftime("%A, %B %-d, %Y")
     
     lines = []
@@ -72,6 +102,7 @@ def generate_guide():
             playlist = json.load(f)
         
         shuffled = shuffle_for_today(playlist, block_name)
+        order = bump_order(bumps, block_name) if bumps else []
         
         start_hour = block["start"] if block["start"] < 24 else block["start"] - 24
         end_hour = block["end"] if block["end"] < 24 else block["end"] - 24
@@ -97,6 +128,8 @@ def generate_guide():
             time_str = format_time(current_time)
             dur_str = format_duration(video["duration"])
             lines.append(f"  {time_str:>10}  {video['title']}  ({dur_str})")
+            if order:
+                lines.append(f"  {'':>10}    · bump: {order[i % len(order)]['id']}")
             current_time += timedelta(seconds=video["duration"] + BUMP_DURATION)
             i += 1
         
@@ -107,4 +140,4 @@ def generate_guide():
     return "\n".join(lines)
 
 if __name__ == "__main__":
-    print(generate_guide())
+    print(generate_guide(show_bumps="--bumps" in sys.argv))

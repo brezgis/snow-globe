@@ -94,6 +94,12 @@
     .tile .n { font-family: 'Space Mono', monospace; font-size: 10px; color: #5c5c5c; letter-spacing: .14em; }
     .tile .t { display: block; font-size: 15px; font-weight: 600; color: #e8e8e8; margin-top: 3px; }
     .tile .d { display: block; font-size: 12.5px; font-weight: 300; color: #858585; margin-top: 3px; line-height: 1.4; }
+    .tile img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; margin-bottom: 10px; background: #000; }
+    .tiles .sect {
+      grid-column: 1 / -1; margin: 22px 2px 2px; font-family: 'Space Mono', monospace; font-size: 11px;
+      letter-spacing: .14em; color: #6f6f6f; text-transform: lowercase;
+    }
+    .tiles .sect:first-child { margin-top: 0; }
 
     @media (max-width: 600px) {
       body { padding: 16px 12px 48px; }
@@ -126,7 +132,7 @@
 
     <div class="bar">
       <div class="now">
-        <div class="now-num" id="num">01 / 22</div>
+        <div class="now-num" id="num"></div>
         <div class="now-name" id="name"></div>
         <div class="now-desc" id="desc"></div>
       </div>
@@ -145,6 +151,7 @@
     <ul class="tiles" id="tiles"></ul>
   </main>
 
+  <script src="bumps/manifest.js"></script>
   <script src="bumps.js"></script>
   <script>
   (function () {
@@ -175,10 +182,13 @@
       scope:      ['oscilloscope', 'what the chord you\'re hearing looks like.'],
     };
 
-    const bumps = window.SG_BUMPS || [];
+    // the films that air, then the live-drawn originals
+    const videos = (window.SG_VIDEO_BUMPS || []).map(v => Object.assign({ video: true }, v));
+    const bumps = videos.concat(window.SG_BUMPS || []);
+    const about = b => b.video ? [b.title, b.desc] : (ABOUT[b.id] || [b.id, '']);
     const $ = id => document.getElementById(id);
     const stage = $('stage'), screen = $('tv');
-    let idx = 0, auto = true, shuffle = false, muted = false;
+    let idx = 0, auto = true, shuffle = false, muted = false, unlocked = false;
     let api = null, advanceT = null, startedAt = 0, audioCtx = null, textPools = null;
 
     // text-card copy, same pools as the channel
@@ -196,40 +206,66 @@
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtx.state === 'suspended') audioCtx.resume();
       } catch (e) { audioCtx = null; }
+      unlocked = true;
+      if (window.SG_video) window.SG_video.unlock();
+      if (api && api.setMuted) api.setMuted(muted);
       $('hint').classList.add('gone');
     }
 
     // ── tiles ──
     const tiles = $('tiles');
+    const sect = text => { const li = document.createElement('li'); li.className = 'sect'; li.textContent = text; tiles.appendChild(li); };
     bumps.forEach((b, i) => {
-      const [t, d] = ABOUT[b.id] || [b.id, ''];
+      if (i === 0 && b.video) sect('on the air · ' + videos.length + ' films, twelve seconds each');
+      if (i === videos.length && i < bumps.length) sect('the originals · drawn live in the browser');
+      const [t, d] = about(b);
       const li = document.createElement('li');
       const btn = document.createElement('button');
       btn.className = 'tile'; btn.dataset.i = i;
       btn.innerHTML = `<span class="n">${String(i + 1).padStart(2, '0')}</span><span class="t"></span><span class="d"></span>`;
+      if (b.video && b.poster) {
+        const img = document.createElement('img');
+        img.src = b.poster; img.alt = ''; img.loading = 'lazy';
+        btn.insertBefore(img, btn.firstChild);
+      }
       btn.querySelector('.t').textContent = t; btn.querySelector('.d').textContent = d;
       btn.addEventListener('click', () => { unlock(); play(i); screen.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
       li.appendChild(btn); tiles.appendChild(li);
     });
 
     // ── playing ──
+    function runLive(b) {
+      return window.SG_playBump(b, stage, { audioCtx, muted, block: 'latenight', time: fmtTime(new Date()), message });
+    }
     function play(i) {
+      if (!bumps.length) return;
       idx = (i + bumps.length) % bumps.length;
       const b = bumps[idx];
       clearTimeout(advanceT);
       screen.classList.add('switching');
       if (api) { api.dispose(); api = null; }
+      const token = {}; play.token = token;
       setTimeout(() => {
+        if (play.token !== token) return;
         stage.innerHTML = '';
         screen.classList.remove('switching');
-        api = window.SG_playBump(b, stage, {
-          audioCtx, muted, block: 'latenight', time: fmtTime(new Date()), message,
-        });
+        if (b.video) {
+          // before the first click the browser only lets it play silent
+          api = window.SG_video.play(b, stage, {
+            offset: 0, muted: muted || !unlocked,
+            onFail: () => { const card = (window.SG_BUMPS || []).find(x => x.id === 'card'); if (card && play.token === token) api = runLive(card); },
+          });
+        } else {
+          api = runLive(b);
+        }
         startedAt = performance.now();
         if (auto) advanceT = setTimeout(() => play(nextIndex()), BUMP_SECONDS * 1000);
+        // have the next film in hand before this one ends
+        const nx = bumps[(idx + 1) % bumps.length];
+        if (nx && nx.video) setTimeout(() => { if (play.token === token) { fetch(nx.src).catch(() => {}); } }, 3000);
       }, 260);
 
-      const [t, d] = ABOUT[b.id] || [b.id, ''];
+      const [t, d] = about(b);
       $('num').textContent = `${String(idx + 1).padStart(2, '0')} / ${bumps.length}`;
       $('name').textContent = t; $('desc').textContent = d;
       document.querySelectorAll('.tile').forEach(el => el.classList.toggle('on', +el.dataset.i === idx));
@@ -262,15 +298,17 @@
       muted = !muted; setPressed($('mute'), muted);
       $('mute').textContent = muted ? 'sound off' : 'sound on';
       if (!muted) unlock();
-      play(idx);  // restart so the new sound setting takes
+      if (api && api.setMuted) api.setMuted(muted);   // films just mute
+      else play(idx);                                  // live bumps restart so the new setting takes
     }
     function toggleFull() {
       if (document.fullscreenElement) document.exitFullscreen();
       else if (screen.requestFullscreen) screen.requestFullscreen();
     }
     // canvases are sized when a bump starts, so restart on resize/fullscreen
-    document.addEventListener('fullscreenchange', () => setTimeout(() => play(idx), 120));
-    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => play(idx), 300); });
+    const restartLive = () => { if (bumps[idx] && !bumps[idx].video) play(idx); };
+    document.addEventListener('fullscreenchange', () => setTimeout(restartLive, 120));
+    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(restartLive, 300); });
 
     $('prev').onclick = () => { unlock(); play(idx - 1); };
     $('next').onclick = () => { unlock(); play(idx + 1); };
@@ -279,7 +317,7 @@
     $('shuf').onclick = () => { shuffle = !shuffle; setPressed($('shuf'), shuffle); };
     $('mute').onclick = toggleMute;
     $('full').onclick = () => { unlock(); toggleFull(); };
-    screen.addEventListener('click', () => { const wasLocked = !audioCtx; unlock(); if (wasLocked && !muted) play(idx); });
+    screen.addEventListener('click', () => { const wasLocked = !unlocked; unlock(); if (wasLocked && !muted && bumps[idx] && !bumps[idx].video) play(idx); });
 
     document.addEventListener('keydown', e => {
       if (e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;

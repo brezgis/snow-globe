@@ -129,6 +129,7 @@ body:hover {
   font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 .sg-stage .bs-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sg-stage .bs-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
 
 /* plain text card */
 .bs-card {

@@ -1,16 +1,20 @@
 // snow-globe — the bump library.
 //
-// Each bump is { id, weight, quiet?, run(stage, api) }. run() draws into
-// `stage` (a full-screen div) and schedules everything through `api`, so
-// app.js can tear it down cleanly when the 12 seconds are up — or sooner,
-// if you tuned in halfway through one. Every sound is synthesized live by
-// synth() below; nothing is pre-recorded.
+// Two kinds of bump live here.
 //
-// Preview any bump: /#bump=sheep, or testBump('sheep', 30) in the console.
+// 1. Video bumps (the ones that air). Produced films, 12.000 s each, listed
+//    in bumps/manifest.js (window.SG_VIDEO_BUMPS) and built by
+//    bumps/src/build.py. SG_video at the bottom of this file plays them:
+//    one shared <video>, preloaded ahead of the slot, seeked to wherever the
+//    schedule says the slot is, and handed back to a live bump if it fails.
+//
+// 2. Live bumps (the originals). Each is { id, weight, quiet?, run(stage, api) },
+//    drawn on canvas with sound synthesized by synth() below. They no longer
+//    air on their own: the 'card' one is the fallback when a video cannot
+//    play, and all of them are still in the reel at /bumps.html.
+//
+// Preview any bump: /#bump=station, or testBump('sheep', 30) in the console.
 // listBumps() lists them all.
-//
-// Most bumps pick from several scripts/variants each time, so the same
-// bump rarely plays out the same way twice.
 
 (function () {
   'use strict';
@@ -861,4 +865,138 @@
 
   window.SG_BUMPS = BUMPS;
   window.SG_playBump = playBump;
+})();
+
+// ── video bumps ────────────────────────────────────────
+// SG_video.play(bump, stage, opts) -> { dispose(), setMuted(bool) }
+//   opts.offset   seconds into the 12 s slot right now (negative: the slot starts later)
+//   opts.muted    start silent
+//   opts.onFail   called once if the file cannot be played in time
+// SG_video.preload(bump) fetches a file ahead of its slot.
+// SG_video.unlock() is called from a user gesture so later bumps may play with sound.
+(function () {
+  'use strict';
+  const SLOT = 12;
+  let el = null, active = null, blessed = false;
+
+  function video() {
+    if (el) return el;
+    el = document.createElement('video');
+    el.className = 'bs-video';
+    el.playsInline = true;
+    el.setAttribute('playsinline', '');
+    el.preload = 'auto';
+    el.disablePictureInPicture = true;
+    return el;
+  }
+  const abs = src => new URL(src, document.baseURI).href;
+
+  function preload(b) {
+    if (!b || active) return;
+    const v = video();
+    if (v.src !== abs(b.src)) { v.src = b.src; v.load(); }
+  }
+
+  function unlock() {
+    if (blessed) return;
+    const v = video();
+    if (active || !v.src) return;      // a playing bump gets unmuted by setMuted instead
+    blessed = true;
+    const vol = v.volume;
+    v.volume = 0; v.muted = false;
+    const p = v.play();
+    const done = () => { if (!active) { v.pause(); try { v.currentTime = 0; } catch (e) {} } v.volume = vol; };
+    if (p && p.then) p.then(done, done); else done();
+  }
+
+  function play(b, stage, opts) {
+    opts = opts || {};
+    const v = video();
+    const t0 = performance.now();
+    const offset = opts.offset || 0;
+    const pos = () => offset + (performance.now() - t0) / 1000;
+    let alive = true, failed = false, started = false;
+    const timers = [];
+    const me = { id: b.id };
+    active = me;
+
+    const fail = (why) => {
+      if (!alive || failed) return;
+      failed = true;
+      console.warn('video bump unavailable, falling back:', b.id, why);
+      v.pause();
+      if (v.parentNode === stage) stage.removeChild(v);
+      if (opts.onFail) opts.onFail();
+    };
+    const onError = () => fail('load error');
+    // Can we jump to second `t`? A server that does not answer range requests
+    // (python's http.server, for one) leaves Chrome with nothing seekable, and
+    // asking anyway stalls the element. There the bump just plays from its start.
+    // GitHub Pages answers range requests, so the live site always seeks.
+    const canSeek = (t) => v.seekable.length > 0 && v.seekable.end(v.seekable.length - 1) >= t;
+    // Keep the picture where the schedule says the slot is: checked when playback
+    // starts and a few times a second after, so a late or refused seek is retried.
+    const resync = () => {
+      if (!alive || failed || !started) return;
+      const p = pos();
+      if (p <= 0 || p >= SLOT - 0.3 || v.seeking) return;
+      if (Math.abs(v.currentTime - p) > 0.35 && canSeek(p)) { try { v.currentTime = p; } catch (e) {} }
+    };
+    const onPlaying = () => { started = true; resync(); };
+    const syncT = setInterval(resync, 300);
+    v.addEventListener('error', onError);
+    v.addEventListener('playing', onPlaying);
+
+    if (v.src !== abs(b.src)) { v.src = b.src; v.load(); }
+    v.muted = !!opts.muted;
+    v.volume = 1;
+    v.loop = false;
+    stage.appendChild(v);
+
+    const begin = () => {
+      if (!alive || failed) return;
+      const p = Math.max(0, pos());
+      if (p >= SLOT - 0.25) return;                    // tuned in at the very end: leave it black
+      const go = () => {
+        if (!alive || failed) return;
+        const now = Math.max(0, pos());
+        try { if (now > 0.05 && canSeek(now)) v.currentTime = now; else if (v.currentTime > 0.05 && canSeek(0)) v.currentTime = 0; } catch (e) {}
+        const pr = v.play();
+        if (pr && pr.catch) pr.catch(err => {
+          if (!alive || failed) return;
+          if (err && err.name === 'NotAllowedError' && !v.muted) {
+            v.muted = true;                             // no gesture yet: play it silent
+            const again = v.play();
+            if (again && again.catch) again.catch(e2 => fail(e2 && e2.name));
+          } else if (err && err.name !== 'AbortError') fail(err.name);
+        });
+      };
+      if (v.readyState >= 1) go(); else v.addEventListener('loadedmetadata', go, { once: true });
+      // if nothing is on screen 2.5 s after the slot should have begun, give up on the file
+      timers.push(setTimeout(() => { if (!started) fail('timeout'); }, 2500));
+    };
+    if (v.error) fail('load error');
+    else if (pos() < 0) {
+      try { v.pause(); if (v.readyState >= 1 && v.currentTime > 0.05 && canSeek(0)) v.currentTime = 0; } catch (e) {}
+      timers.push(setTimeout(begin, -pos() * 1000));
+    } else begin();
+
+    me.setMuted = (m) => { if (alive && !failed) v.muted = !!m; };
+    me.dispose = () => {
+      if (!alive) return;
+      alive = false;
+      timers.forEach(clearTimeout);
+      clearInterval(syncT);
+      v.removeEventListener('error', onError);
+      v.removeEventListener('playing', onPlaying);
+      v.pause();
+      if (active === me) active = null;
+      // leave the last frame up while the stage fades, then take the element back
+      setTimeout(() => { if (!active && v.parentNode === stage) stage.removeChild(v); }, 1300);
+    };
+    return me;
+  }
+
+  window.SG_VIDEO_BUMPS = window.SG_VIDEO_BUMPS || [];
+  window.SG_video = { play, preload, unlock, SLOT };
 })();
